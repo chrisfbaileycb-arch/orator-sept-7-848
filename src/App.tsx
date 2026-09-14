@@ -7,36 +7,44 @@ import ForgeDirector from "./components/ForgeDirector";
 import VerificationGate from "./components/VerificationGate";
 import Deliverables from "./components/Deliverables";
 import BookingModal from "./components/BookingModal";
-import CharterModal from "./components/CharterModal";
+import BuildPassModal from "./components/BuildPassModal";
 import McpBenchModal from "./components/McpBenchModal";
+import ConceptSandboxModal from "./components/ConceptSandboxModal";
 import { useSession } from "./lib/session";
 import { useScarcityAlerts, computeTelemetry } from "./lib/telemetry";
 import { buildPlan } from "./lib/generator";
 import { runAudit } from "./lib/audit";
-import { inquestDigest } from "./lib/router";
 import { redactSecrets } from "./lib/security";
 import { orate, hush, startDrone, setDroneEnergy } from "./lib/voice";
 import type { ForgePlan } from "./lib/types";
+import type { DesignExploration } from "./lib/exploration-types";
+import { globalExplorationService } from "./lib/exploration-service";
 
-/** ---------- ORATOR.AI application shell ---------- */
+/** ---------- ORATOR.AI DESIGN STUDIO & APPLICATION SHELL ---------- */
 
 export default function App() {
   const session = useSession();
   const [showBooking, setShowBooking] = useState(false);
-  const [showCharter, setShowCharter] = useState(false);
+  const [showBuildPass, setShowBuildPass] = useState(false);
   const [showBench, setShowBench] = useState(false);
   const [plan, setPlan] = useState<ForgePlan | null>(null);
   const [gateOpen, setGateOpen] = useState(false);
   const audit = useMemo(() => (plan ? runAudit(plan) : null), [plan]);
 
+  // Design Exploration states
+  const [activeExploration, setActiveExploration] = useState<DesignExploration | null>(null);
+  const [selectedSandboxExploration, setSelectedSandboxExploration] = useState<DesignExploration | null>(null);
+  const [explorationsList, setExplorationsList] = useState<DesignExploration[]>(() =>
+    globalExplorationService.getAllExplorations(session.session.clientId)
+  );
+
+  const remainingExplorations = globalExplorationService.getRemainingExplorations(session.session.clientId);
   const telemetry = useMemo(() => computeTelemetry(session.session.sessionsUsed), [session.session.sessionsUsed]);
   const alerts = useScarcityAlerts(session.session.status === "landing" || session.session.status === "inquest");
 
-  // Route guards: session status drives the deck shown
   const status = session.session.status;
 
-  // Ambient drone: begins on first user gesture (browser autoplay policy),
-  // follows build energy across the app.
+  // Ambient drone: begins on first user gesture
   useEffect(() => {
     const ignite = () => {
       startDrone();
@@ -52,10 +60,10 @@ export default function App() {
     };
   }, []);
 
-  // Greet on first arrival; hush when the app unmounts.
+  // Greet on first arrival
   useEffect(() => {
     if (session.session.status === "landing" && session.session.sessionsUsed === 0) {
-      void orate("The Orator is listening. Strike the orb to wake the forge.");
+      void orate("The Orator is listening. Welcome to the Orator Design Studio. Three Design Explorations are included.");
     }
     return () => hush();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -63,37 +71,61 @@ export default function App() {
 
   useEffect(() => {
     if (status === "forging" && !plan) {
-      // Missing plan (e.g. stale persisted state) — send back to inquest
       session.resetSession();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status]);
 
-  const startInquest = () => {
-    if (!session.canForge) {
-      session.requirePayment();
-      setShowCharter(true);
+  // Start a new Design Exploration
+  const startExploration = () => {
+    const check = globalExplorationService.canStartExploration(session.session.clientId);
+    if (!check.allowed) {
+      setShowBuildPass(true);
       return;
     }
     session.beginInquest();
   };
 
-  const handleInquestComplete = () => {
+  // When Inquest completes: produce the Design Exploration (Concept Brief + Concept Sandbox)
+  // or proceed directly to Complete Build if already in Complete Build mode
+  const handleInquestComplete = async () => {
+    try {
+      // Conduct Design Exploration
+      const exploration = await globalExplorationService.conductExploration(
+        session.session.clientId,
+        session.session.answers,
+        session.session.ingest
+      );
+      setActiveExploration(exploration);
+      setSelectedSandboxExploration(exploration);
+      setExplorationsList(globalExplorationService.getAllExplorations(session.session.clientId));
+      session.resetSession(); // Return smoothly to studio landing with sandbox open
+    } catch (err: any) {
+      console.error("Exploration error:", err);
+    }
+  };
+
+  // Move a selected Design Exploration directly into a Complete Orator Build
+  const handleMoveToCompleteBuild = (exploration: DesignExploration) => {
+    setSelectedSandboxExploration(null);
+
+    // If user has not purchased a build pass, open the Build Pass modal
     if (!session.canForge) {
       session.requirePayment();
-      setShowCharter(true);
+      setShowBuildPass(true);
       return;
     }
+
+    // Convert exploration seamlessly into a BuildBrief and build plan
+    const brief = globalExplorationService.transitionToCompleteBuildBrief(exploration.id);
     setPlan(
-      buildPlan(session.session.answers, session.session.clientId, session.isChartered ? "paid" : "free")
+      buildPlan(brief.preservedAnswers, session.session.clientId, session.isChartered ? "paid" : "free")
     );
     session.beginForging();
   };
 
   const handleForgeComplete = (finished: ForgePlan) => {
-    // Journal + dossier texts pass through redaction before persisting anywhere.
     redactSecrets(JSON.stringify(finished));
-    // The 22-point invariant audit runs NOW — the final gate before delivery.
     setGateOpen(true);
   };
 
@@ -107,9 +139,10 @@ export default function App() {
     setShowBooking(false);
   };
 
-  const handleCharterAccept = () => {
-    session.payCharter();
-    setShowCharter(false);
+  const handleGrantPass = (tierId: "single" | "builder" | "studio") => {
+    globalExplorationService.grantBuildPass(session.session.clientId, tierId);
+    session.activateBuildPass(tierId);
+    setShowBuildPass(false);
   };
 
   const newForge = () => {
@@ -129,7 +162,7 @@ export default function App() {
       <HudChrome
         telemetry={telemetry}
         alerts={alerts}
-        remainingFree={session.remainingFree}
+        remainingFree={remainingExplorations}
         isChartered={session.isChartered}
         onBook={() => setShowBooking(true)}
         onBench={() => setShowBench(true)}
@@ -140,9 +173,13 @@ export default function App() {
           <Landing
             session={session}
             telemetry={telemetry}
-            onBegin={startInquest}
+            explorations={explorationsList}
+            remainingExplorations={remainingExplorations}
+            onBeginExploration={startExploration}
+            onOpenSandbox={(exp) => setSelectedSandboxExploration(exp)}
+            onMoveToBuild={handleMoveToCompleteBuild}
             onBook={() => setShowBooking(true)}
-            onCharter={() => setShowCharter(true)}
+            onOpenBuildPasses={() => setShowBuildPass(true)}
           />
         )}
 
@@ -178,7 +215,7 @@ export default function App() {
       </main>
 
       <footer className="relative z-10 border-t border-seam/60 py-6 text-center font-mono-hud text-[9px] tracking-[0.22em] text-forge-dim">
-        ORATOR.AI // CLOSED-LOOP MANUFACTURING · 16-EXPERT MoE · ZERO-DISK RUNTIME · SECRETS STAY SERVER-SIDE
+        ORATOR.AI // ORATOR DESIGN STUDIO · 16-EXPERT MoE · COMPLETE ORATOR BUILDS · SECRETS STAY SERVER-SIDE
       </footer>
 
       {showBooking && (
@@ -188,13 +225,28 @@ export default function App() {
           onClose={() => setShowBooking(false)}
         />
       )}
-      {showCharter && (
-        <CharterModal
-          sessionsUsed={session.session.sessionsUsed}
-          onAccept={handleCharterAccept}
-          onClose={() => setShowCharter(false)}
+
+      {showBuildPass && (
+        <BuildPassModal
+          clientId={session.session.clientId}
+          explorationsCompleted={3 - remainingExplorations}
+          onGrantPass={handleGrantPass}
+          onClose={() => setShowBuildPass(false)}
         />
       )}
+
+      {selectedSandboxExploration && (
+        <ConceptSandboxModal
+          exploration={selectedSandboxExploration}
+          onClose={() => setSelectedSandboxExploration(null)}
+          onRefineDirection={() => {
+            setSelectedSandboxExploration(null);
+            session.beginInquest();
+          }}
+          onMoveToCompleteBuild={handleMoveToCompleteBuild}
+        />
+      )}
+
       {showBench && <McpBenchModal onClose={() => setShowBench(false)} />}
     </div>
   );

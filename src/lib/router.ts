@@ -1,30 +1,30 @@
 import type { ModelExpert, InquestAnswer, ForgePlan } from "./types";
 import { INQUEST_QUESTIONS } from "./inquest";
 
-/** ---------- 16-Model Mixture-of-Experts Router (deterministic demo mode) ----------
+/** ---------- 16-Model Mixture-of-Experts Router (Multi-Provider Architecture) ----------
  *
- * The router selects the expert quorum for a forge run. In demo mode it rotates a
- * fixed roster of 16 experts across providers. When OPENROUTER_API_KEY is wired to
- * a server-side action, `LIVE_ROUTER` flips and quorum selection weights by tier.
+ * The router selects the expert quorum for a forge run. In multi-provider mode,
+ * Cheaper Inference serves as the preferred multi-provider route with OpenRouter,
+ * direct providers, and deterministic autonomous fallback.
  */
 
 export const EXPERT_ROSTER: ModelExpert[] = [
-  { id: "exp-arch-1", label: "ORATOR-Architect", provider: "openrouter", model: "openai/gpt-4o", role: "architect", tier: "paid" },
-  { id: "exp-arch-2", label: "ORATOR-Architect-Lite", provider: "openrouter", model: "openai/gpt-4o-mini", role: "architect", tier: "free" },
-  { id: "exp-schema-1", label: "SchemaSmith", provider: "openrouter", model: "google/gemini-1.5-pro", role: "schema", tier: "paid" },
-  { id: "exp-schema-2", label: "SchemaSmith-Lite", provider: "openrouter", model: "google/gemini-1.5-flash", role: "schema", tier: "free" },
-  { id: "exp-be-1", label: "BackendForge", provider: "openrouter", model: "openai/gpt-4o", role: "backend", tier: "paid" },
-  { id: "exp-be-2", label: "BackendForge-Lite", provider: "openrouter", model: "openai/gpt-4o-mini", role: "backend", tier: "free" },
-  { id: "exp-fe-1", label: "FacadeWeaver", provider: "openrouter", model: "anthropic/claude-3.5-sonnet", role: "frontend", tier: "paid" },
-  { id: "exp-fe-2", label: "FacadeWeaver-Lite", provider: "openrouter", model: "anthropic/claude-3-haiku", role: "frontend", tier: "free" },
+  { id: "exp-arch-1", label: "ORATOR-Architect", provider: "cheaper-inference", model: "openai/gpt-4o", role: "architect", tier: "paid" },
+  { id: "exp-arch-2", label: "ORATOR-Architect-Lite", provider: "cheaper-inference", model: "openai/gpt-4o-mini", role: "architect", tier: "free" },
+  { id: "exp-schema-1", label: "SchemaSmith", provider: "cheaper-inference", model: "google/gemini-1.5-pro", role: "schema", tier: "paid" },
+  { id: "exp-schema-2", label: "SchemaSmith-Lite", provider: "cheaper-inference", model: "google/gemini-1.5-flash", role: "schema", tier: "free" },
+  { id: "exp-be-1", label: "BackendForge", provider: "cheaper-inference", model: "openai/gpt-4o", role: "backend", tier: "paid" },
+  { id: "exp-be-2", label: "BackendForge-Lite", provider: "cheaper-inference", model: "meta-llama/llama-3.3-70b-instruct", role: "backend", tier: "free" },
+  { id: "exp-fe-1", label: "FacadeWeaver", provider: "cheaper-inference", model: "anthropic/claude-3.5-sonnet", role: "frontend", tier: "paid" },
+  { id: "exp-fe-2", label: "FacadeWeaver-Lite", provider: "cheaper-inference", model: "deepseek/deepseek-chat", role: "frontend", tier: "free" },
   { id: "exp-rev-1", label: "Adversary-Review", provider: "openrouter", model: "openai/gpt-4o", role: "review", tier: "paid" },
-  { id: "exp-rev-2", label: "Adversary-Review-Lite", provider: "openrouter", model: "openai/gpt-4o-mini", role: "review", tier: "free" },
-  { id: "exp-sec-1", label: "Aegis-Security", provider: "openrouter", model: "google/gemini-1.5-pro", role: "security", tier: "paid" },
-  { id: "exp-sec-2", label: "Aegis-Security-Lite", provider: "openrouter", model: "google/gemini-1.5-flash", role: "security", tier: "free" },
+  { id: "exp-rev-2", label: "Adversary-Review-Lite", provider: "cheaper-inference", model: "openai/gpt-4o-mini", role: "review", tier: "free" },
+  { id: "exp-sec-1", label: "Aegis-Security", provider: "cheaper-inference", model: "anthropic/claude-3.5-sonnet", role: "security", tier: "paid" },
+  { id: "exp-sec-2", label: "Aegis-Security-Lite", provider: "cheaper-inference", model: "google/gemini-1.5-flash", role: "security", tier: "free" },
   { id: "exp-perf-1", label: "Kinetic-Perf", provider: "openrouter", model: "openai/gpt-4o", role: "performance", tier: "paid" },
-  { id: "exp-perf-2", label: "Kinetic-Perf-Lite", provider: "openrouter", model: "openai/gpt-4o-mini", role: "performance", tier: "free" },
-  { id: "exp-core-1", label: "ORATOR-Core", provider: "openrouter", model: "openai/gpt-4o", role: "architect", tier: "paid" },
-  { id: "exp-core-2", label: "ORATOR-Core-Lite", provider: "openrouter", model: "google/gemini-1.5-flash", role: "architect", tier: "free" },
+  { id: "exp-perf-2", label: "Kinetic-Perf-Lite", provider: "cheaper-inference", model: "openai/gpt-4o-mini", role: "performance", tier: "free" },
+  { id: "exp-core-1", label: "ORATOR-Core", provider: "cheaper-inference", model: "anthropic/claude-3.5-sonnet", role: "architect", tier: "paid" },
+  { id: "exp-core-2", label: "ORATOR-Core-Lite", provider: "cheaper-inference", model: "google/gemini-1.5-flash", role: "architect", tier: "free" },
 ];
 
 /** Rotate quorum deterministically by client + question count so demo runs vary. */
@@ -53,8 +53,8 @@ export interface RouterEvent {
 
 export function routerIntroLine(tier: "free" | "paid"): string {
   return tier === "paid"
-    ? "MoE router engaged — high-reasoning quorum, 16 experts on standby."
-    : "MoE router engaged — free-tier rotation, 16 experts on standby.";
+    ? "MoE router engaged — high-reasoning quorum, multi-provider experts on standby."
+    : "MoE router engaged — economical multi-provider rotation, 16 experts on standby.";
 }
 
 /** Extract the archetype keyword used by the generator to theme the plan. */

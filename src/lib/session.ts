@@ -1,16 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { IngestItem, SessionState } from "./types";
+import { globalEntitlementService, FREE_TRYOUTS_DEFAULT } from "./build-pass-service";
 
-/** ---------- Session allowance + velvet rope state ---------- */
+/** ---------- Session allowance + Build Pass Entitlement state ---------- */
 
 const STORAGE_KEY = "orator.session.v1";
 const BOOKINGS_KEY = "orator.bookings.v1";
-export const FREE_SESSIONS = 3;
-export const CHARTER_PRICE_USD = 99;
+export const FREE_SESSIONS = FREE_TRYOUTS_DEFAULT; // 3 free tryouts
+export const CHARTER_PRICE_USD = 99; // Legacy alias for builder pass ($99)
 
 function makeClientId(): string {
   const bytes = new Uint8Array(8);
-  crypto.getRandomValues(bytes);
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 8; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
@@ -25,6 +30,7 @@ function loadSession(): SessionState {
         return {
           ...parsed,
           chartered: parsed.chartered === true,
+          freeSessions: FREE_SESSIONS,
           ingest: Array.isArray(parsed.ingest) ? parsed.ingest : [],
         };
       }
@@ -55,7 +61,8 @@ export interface SessionApi {
   beginForging: () => void;
   markDelivered: () => void;
   requirePayment: () => void;
-  payCharter: () => void;
+  activateBuildPass: (tierId: "single" | "builder" | "studio") => void;
+  payCharter: () => void; // Kept for interface backward-compatibility
   markBooked: (slotISO: string) => void;
   resetSession: () => void;
 }
@@ -63,6 +70,7 @@ export interface SessionApi {
 export function useSession(): SessionApi {
   const [session, setSession] = useState<SessionState>(loadSession);
   const sessionRef = useRef(session);
+
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
@@ -91,18 +99,28 @@ export function useSession(): SessionApi {
   }, []);
 
   const beginForging = useCallback(() => {
-    setSession((s) => ({ ...s, status: "forging", sessionsUsed: s.sessionsUsed + 1 }));
+    // Note: Session count is finalized during verified delivery
+    setSession((s) => ({ ...s, status: "forging" }));
   }, []);
 
   const markDelivered = useCallback(() => {
-    setSession((s) => ({ ...s, status: "delivered" }));
+    const current = sessionRef.current;
+    // Idempotently consume entitlement
+    globalEntitlementService.consumeSession(current.clientId, `build-${Date.now()}`);
+    setSession((s) => ({
+      ...s,
+      status: "delivered",
+      sessionsUsed: s.sessionsUsed + 1,
+    }));
   }, []);
 
   const requirePayment = useCallback(() => {
     setSession((s) => ({ ...s, status: "payment_required" }));
   }, []);
 
-  const payCharter = useCallback(() => {
+  const activateBuildPass = useCallback((tierId: "single" | "builder" | "studio") => {
+    const current = sessionRef.current;
+    globalEntitlementService.grantEvaluationPass(current.clientId, tierId);
     setSession((s) => ({
       ...s,
       status: "inquest",
@@ -111,6 +129,10 @@ export function useSession(): SessionApi {
       ingest: [],
     }));
   }, []);
+
+  const payCharter = useCallback(() => {
+    activateBuildPass("builder");
+  }, [activateBuildPass]);
 
   const markBooked = useCallback((slotISO: string) => {
     const current = sessionRef.current;
@@ -129,8 +151,11 @@ export function useSession(): SessionApi {
   }, []);
 
   const remainingFree = Math.max(0, session.freeSessions - session.sessionsUsed);
-  const isChartered = session.chartered;
-  const canForge = isChartered || session.sessionsUsed < session.freeSessions;
+  const entitlement = globalEntitlementService.getAccount(session.clientId);
+  const remainingPaid = Math.max(0, entitlement.paidSessionsPurchased - entitlement.paidSessionsUsed);
+
+  const canForge = session.chartered || remainingFree > 0 || remainingPaid > 0 || entitlement.unlimitedEvaluation === true;
+  const isChartered = session.chartered || remainingPaid > 0;
 
   return {
     session,
@@ -143,6 +168,7 @@ export function useSession(): SessionApi {
     beginForging,
     markDelivered,
     requirePayment,
+    activateBuildPass,
     payCharter,
     markBooked,
     resetSession,

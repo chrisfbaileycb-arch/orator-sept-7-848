@@ -50,32 +50,24 @@ export function speechSupported(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window;
 }
 
-/** Speak a line as the Orator. Resolves when the utterance ends (or immediately on error). */
-export function orate(text: string, opts?: { rate?: number; pitch?: number; volume?: number }): Promise<void> {
-  return new Promise((resolve) => {
-    if (!speechOn || !speechSupported() || !text) return resolve();
-    try {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      const v = pickVoice();
-      if (v) u.voice = v;
-      u.rate = opts?.rate ?? 0.95;
-      u.pitch = opts?.pitch ?? 0.85; // low, measured
-      u.volume = opts?.volume ?? 0.9;
-      u.onend = () => resolve();
-      u.onerror = () => resolve();
-      window.speechSynthesis.speak(u);
-    } catch {
-      resolve();
-    }
-  });
+import { oratorVoice } from "./voice-service";
+import { globalAudioEngine } from "./audio-engine";
+
+export { oratorVoice };
+export { globalAudioEngine };
+
+/**
+ * Speak a line as the Orator. Routes through the provider-neutral OratorVoiceService.
+ * Resolves when speech completes, pauses, or is interrupted.
+ */
+export async function orate(text: string, opts?: { rate?: number; pitch?: number; volume?: number }): Promise<void> {
+  if (!speechOn || !text) return;
+  return oratorVoice.speak(text, opts);
 }
 
-/** Cancel any in-flight speech (e.g. on route change). */
+/** Cancel any in-flight speech (e.g. on route change or user interruption). */
 export function hush() {
-  if (speechSupported()) {
-    try { window.speechSynthesis.cancel(); } catch { /* noop */ }
-  }
+  oratorVoice.stop();
 }
 
 // ---------------------------------------------------------------- LISTEN
@@ -111,11 +103,47 @@ export interface ListenHandle {
   stop: () => void;
 }
 
-/** Start one-shot voice capture; resolves with the final transcript. */
-export function listen(onPartial?: (partial: string) => void): Promise<{ text: string; handle: ListenHandle }> {
+export interface ListenOptions {
+  onPartial?: (partial: string) => void;
+  onStream?: (stream: MediaStream) => void;
+  onWord?: (word: string) => void;
+}
+
+/**
+ * Start voice capture with real microphone audio stream extraction for the Web Audio analyzer.
+ * Returns the final transcript and guarantees full track and recognizer cleanup.
+ */
+export async function listen(
+  onPartialOrOpts?: ((partial: string) => void) | ListenOptions
+): Promise<{ text: string; handle: ListenHandle }> {
+  const opts: ListenOptions =
+    typeof onPartialOrOpts === "function" ? { onPartial: onPartialOrOpts } : onPartialOrOpts ?? {};
+
+  const Ctor = recognitionCtor();
+  if (!Ctor) throw new Error("Speech recognition unsupported");
+
+  // Attempt to acquire real MediaStream for Web Audio API frequency/waveform analysis
+  let micStream: MediaStream | null = null;
+  if (typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      if (micStream) {
+        globalAudioEngine.connectMicrophone(micStream);
+        opts.onStream?.(micStream);
+      }
+    } catch (err) {
+      // If user denies mic or device busy, speech recognition might still run (or fail gracefully)
+      console.warn("[voice] getUserMedia stream unavailable:", err);
+    }
+  }
+
   return new Promise((resolve, reject) => {
-    const Ctor = recognitionCtor();
-    if (!Ctor) return reject(new Error("Speech recognition unsupported"));
     try {
       const rec = new Ctor();
       rec.lang = "en-US";
@@ -123,9 +151,33 @@ export function listen(onPartial?: (partial: string) => void): Promise<{ text: s
       rec.maxAlternatives = 1;
       rec.continuous = false;
       let finalText = "";
-      const handle: ListenHandle = {
-        stop: () => { try { rec.stop(); } catch { /* noop */ } },
+      let lastPartialWordCount = 0;
+
+      const cleanup = () => {
+        globalAudioEngine.disconnectSource();
+        if (micStream) {
+          micStream.getTracks().forEach((track) => {
+            try {
+              track.stop();
+            } catch {
+              /* ignore */
+            }
+          });
+          micStream = null;
+        }
       };
+
+      const handle: ListenHandle = {
+        stop: () => {
+          try {
+            rec.stop();
+          } catch {
+            /* noop */
+          }
+          cleanup();
+        },
+      };
+
       rec.onresult = (ev) => {
         let interim = "";
         for (let i = 0; i < ev.results.length; i++) {
@@ -134,18 +186,37 @@ export function listen(onPartial?: (partial: string) => void): Promise<{ text: s
           if (r.isFinal) finalText += alt?.transcript ?? "";
           else interim += alt?.transcript ?? "";
         }
-        if (interim && onPartial) onPartial(interim);
+        if (interim && opts.onPartial) {
+          opts.onPartial(interim);
+          // Check for new word arrival to trigger ripple
+          const words = interim.trim().split(/\s+/).filter(Boolean);
+          if (words.length > lastPartialWordCount) {
+            lastPartialWordCount = words.length;
+            opts.onWord?.(words[words.length - 1]);
+          }
+        }
       };
-      rec.onend = () => resolve({ text: finalText.trim(), handle });
+
+      rec.onend = () => {
+        cleanup();
+        resolve({ text: finalText.trim(), handle });
+      };
+
       rec.onerror = (ev) => {
+        cleanup();
         if (ev?.error === "no-speech" || ev?.error === "aborted") {
           resolve({ text: finalText.trim(), handle });
         } else {
           reject(new Error(ev?.error ?? "speech recognition error"));
         }
       };
+
       rec.start();
     } catch (e) {
+      if (micStream) {
+        micStream.getTracks().forEach((t) => t.stop());
+      }
+      globalAudioEngine.disconnectSource();
       reject(e instanceof Error ? e : new Error("recognition failed"));
     }
   });

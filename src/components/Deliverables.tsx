@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import type { ForgePlan, IngestItem } from "../lib/types";
+import type { PreviewCapsule } from "../lib/capsule-types";
 import { MindMapRenderer } from "../canvas/MindMapCanvas";
 import { downloadZip } from "../lib/zip";
+import { globalCapsuleService } from "../lib/capsule-service";
+import PreviewCapsuleModal from "./PreviewCapsuleModal";
+import DeploymentAdvisorModal from "./DeploymentAdvisorModal";
 
-/** ---------- Delivery deck: mind map, audit, blueprint, sandbox, ZIP ---------- */
+/** ---------- Delivery deck: 3 Primary Actions: Preview Capsule, Permanent Hosting, Download ZIP ---------- */
 
 interface Props {
   plan: ForgePlan;
@@ -22,24 +26,23 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "audit", label: "22-PT AUDIT" },
   { id: "code", label: "BLUEPRINT" },
   { id: "sandbox", label: "SANDBOX" },
-  { id: "dossier", label: "DELIVERY" },
-];
-
-const KIND_LEGEND: [string, string][] = [
-  ["core", "#f2c14e"],
-  ["system", "#35e0ff"],
-  ["contract", "#8be9c3"],
-  ["ops", "#7d95b2"],
+  { id: "dossier", label: "DELIVERY & HOSTING" },
 ];
 
 export default function Deliverables({ plan, auditScore, auditPassed, auditTotal, ingest, onNewForge }: Props) {
   const fileCount = ingest.filter((i) => i.kind !== "repo").length;
   const repoCount = ingest.length - fileCount;
-  const [tab, setTab] = useState<Tab>("map");
+  const [tab, setTab] = useState<Tab>("dossier"); // Default to Delivery & Hosting so the 3 actions are immediately visible!
   const [activeFile, setActiveFile] = useState(0);
   const [tooltip, setTooltip] = useState<{ label: string; detail: string } | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<MindMapRenderer | null>(null);
+
+  // Preview Capsule & Deployment Advisor states
+  const [activeCapsule, setActiveCapsule] = useState<PreviewCapsule | null>(null);
+  const [isCreatingCapsule, setIsCreatingCapsule] = useState(false);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [showAdvisorModal, setShowAdvisorModal] = useState(false);
 
   useEffect(() => {
     if (tab !== "map" || !canvasRef.current) return;
@@ -70,6 +73,49 @@ export default function Deliverables({ plan, auditScore, auditPassed, auditTotal
     <p style="color:#7d95b2">jailed preview — sandbox attribute blocks scripts and host access</p>
   </body></html>`;
 
+  // Launch or open Preview Capsule
+  const handleLaunchCapsule = async () => {
+    if (activeCapsule && activeCapsule.status === "READY") {
+      setShowPreviewModal(true);
+      return;
+    }
+    setIsCreatingCapsule(true);
+    try {
+      const capsule = await globalCapsuleService.createCapsule(
+        "proj-" + Date.now(),
+        "client-current",
+        "build-" + Date.now(),
+        plan.files,
+        {
+          appName: plan.appName,
+          archetype: plan.archetype,
+          summary: plan.summary,
+          stack: plan.stack,
+          entryPoint: "src/main.tsx",
+        },
+        { tier: "free" }
+      );
+      setActiveCapsule(capsule);
+      setShowPreviewModal(true);
+    } finally {
+      setIsCreatingCapsule(false);
+    }
+  };
+
+  const handleExtendCapsule = (hours: number) => {
+    if (!activeCapsule) return;
+    globalCapsuleService.extendCapsule(activeCapsule.id, hours);
+    const updated = globalCapsuleService.getCapsule(activeCapsule.id);
+    setActiveCapsule(updated);
+  };
+
+  const handleDeleteCapsule = () => {
+    if (!activeCapsule) return;
+    globalCapsuleService.deleteCapsule(activeCapsule.id);
+    setActiveCapsule(null);
+    setShowPreviewModal(false);
+  };
+
   return (
     <div className="relative mx-auto max-w-5xl px-4 pb-24 pt-24">
       {/* Summary plate */}
@@ -99,10 +145,10 @@ export default function Deliverables({ plan, auditScore, auditPassed, auditTotal
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`rounded-lg border px-3.5 py-2 font-mono-hud text-[10px] tracking-[0.14em] transition-all ${
+            className={`rounded-md border px-3 py-1.5 font-mono-hud text-[10px] tracking-wider transition-colors ${
               tab === t.id
-                ? "border-forge-cyan/60 bg-forge-cyan/10 text-forge-cyan"
-                : "border-seam text-forge-dim hover:border-forge-cyan/40 hover:text-pearl"
+                ? "border-forge-cyan/80 bg-depth text-forge-cyan font-bold"
+                : "border-seam text-forge-dim hover:text-pearl"
             }`}
           >
             {t.label}
@@ -110,41 +156,42 @@ export default function Deliverables({ plan, auditScore, auditPassed, auditTotal
         ))}
       </div>
 
-      <div className="hud-panel corner-tick relative min-h-[420px] p-4">
+      {/* Panels */}
+      <div className="hud-panel p-4">
         {/* MIND MAP */}
         {tab === "map" && (
-          <div className="relative">
-            <canvas ref={canvasRef} className="h-[420px] w-full" />
-            <div className="pointer-events-none absolute left-2 top-2 flex gap-2">
-              {KIND_LEGEND.map(([kind, color]) => (
-                <span key={kind} className="flex items-center gap-1.5 font-mono-hud text-[9px] tracking-[0.14em] text-forge-dim">
-                  <span className="inline-block h-2 w-2 rounded-full" style={{ background: color }} />
-                  {kind.toUpperCase()}
-                </span>
-              ))}
-            </div>
+          <div className="relative h-[480px] w-full overflow-hidden rounded-lg bg-abyss/80">
+            <canvas ref={canvasRef} className="h-full w-full" />
             {tooltip && (
-              <div className="pointer-events-none absolute bottom-2 left-1/2 w-[min(90%,460px)] -translate-x-1/2 rounded-lg border border-forge-cyan/40 bg-abyss/90 px-3.5 py-2 text-center backdrop-blur">
-                <div className="font-mono-hud text-[11px] font-bold text-forge-cyan">{tooltip.label}</div>
-                <div className="mt-0.5 text-[11px] leading-snug text-forge-dim">{tooltip.detail}</div>
+              <div className="pointer-events-none absolute bottom-4 left-4 max-w-xs rounded border border-seam bg-depth/90 p-2.5 font-mono-hud text-[10px] text-pearl backdrop-blur">
+                <div className="font-bold text-forge-cyan">{tooltip.label}</div>
+                <div className="mt-0.5 text-forge-dim">{tooltip.detail}</div>
               </div>
             )}
-            <div className="pointer-events-none absolute right-2 top-2 font-mono-hud text-[9px] tracking-[0.14em] text-forge-dim">
-              PHOTON TRANSIT LIVE · HOVER NODES
-            </div>
           </div>
         )}
 
-        {/* AUDIT */}
+        {/* 22-PT AUDIT */}
         {tab === "audit" && (
-          <div>
-            <div className="mb-4 flex items-center gap-4 rounded-lg border border-seam bg-depth/60 px-4 py-3">
-              <div className="relative h-14 w-14 shrink-0">
-                <svg viewBox="0 0 40 40" className="h-14 w-14 -rotate-90">
-                  <circle cx="20" cy="20" r="16" fill="none" stroke="#16283f" strokeWidth="4" />
-                  <circle
-                    cx="20" cy="20" r="16" fill="none" stroke="#35e0ff" strokeWidth="4" strokeLinecap="round"
-                    strokeDasharray={`${(auditScore / 100) * 2 * Math.PI * 16} ${2 * Math.PI * 16}`}
+          <div className="space-y-3">
+            <div className="flex items-center gap-4 border-b border-seam pb-3">
+              <div className="relative h-12 w-12 shrink-0">
+                <svg className="h-12 w-12 -rotate-90" viewBox="0 0 36 36">
+                  <path
+                    className="text-seam"
+                    strokeWidth="3.5"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
+                  />
+                  <path
+                    className="text-forge-cyan"
+                    strokeDasharray={`${auditScore}, 100`}
+                    strokeWidth="3.5"
+                    strokeLinecap="round"
+                    stroke="currentColor"
+                    fill="none"
+                    d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                   />
                 </svg>
                 <span className="absolute inset-0 flex items-center justify-center font-mono-hud text-[10px] font-bold text-forge-cyan">
@@ -179,7 +226,7 @@ export default function Deliverables({ plan, auditScore, auditPassed, auditTotal
         {/* BLUEPRINT */}
         {tab === "code" && (
           <div>
-            <div className="mb-2 flex gap-1.5">
+            <div className="mb-2 flex flex-wrap gap-1.5">
               {plan.files.map((f, i) => (
                 <button
                   key={f.path}
@@ -215,20 +262,93 @@ export default function Deliverables({ plan, auditScore, auditPassed, auditTotal
           </div>
         )}
 
-        {/* DELIVERY */}
+        {/* DELIVERY & HOSTING — THE 3 PRIMARY CHOICES */}
         {tab === "dossier" && (
-          <div className="flex h-full flex-col items-center justify-center py-10 text-center">
+          <div className="flex flex-col items-center justify-center py-6 text-center">
             <div className="font-mono-hud text-[10px] tracking-[0.3em] text-forge-gold">✦ SEALED DELIVERY ✦</div>
-            <h3 className="mt-3 font-display text-xl font-semibold text-pearl">
-              {plan.appName} is ready to leave the forge
+            <h3 className="mt-2 font-display text-2xl font-semibold text-pearl">
+              {plan.appName} is Verified and Ready
             </h3>
-            <p className="mx-auto mt-2 max-w-md text-[12px] leading-relaxed text-forge-dim">
-              Deterministic ZIP, audit dossier {auditPassed}/{auditTotal}, quorum journal, and blueprint
-              files — assembled in memory, checksummed on seal.
+            <p className="mx-auto mt-2 max-w-xl text-[12.5px] leading-relaxed text-forge-dim">
+              Your software has passed the 22-point invariant audit. Choose from the three next steps below: test an isolated interactive preview, complete the questionnaire to find independent permanent hosting, or download your complete project ZIP.
             </p>
 
-            {/* Ingested context — attachments + connected repos persisted from the inquest */}
-            <div className="mx-auto mt-6 max-w-lg text-left">
+            {/* THREE PRIMARY CHOICES CARDS */}
+            <div className="mt-8 grid w-full max-w-3xl grid-cols-1 gap-4 md:grid-cols-3 text-left">
+              {/* CHOICE 1: LAUNCH TEMPORARY PREVIEW */}
+              <div className="flex flex-col justify-between rounded-xl border border-forge-cyan/50 bg-forge-cyan/5 p-4 transition-all hover:border-forge-cyan">
+                <div>
+                  <div className="font-mono-hud text-[9px] font-bold tracking-widest text-forge-cyan">
+                    CHOICE 1 // INTERACTIVE
+                  </div>
+                  <h4 className="mt-1 font-display text-base font-semibold text-pearl">
+                    Launch Temporary Preview
+                  </h4>
+                  <p className="mt-2 text-[11px] text-forge-dim leading-relaxed">
+                    Create a time-limited (24–72h) interactive URL to test forms, responsive views, and gather viewer feedback.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleLaunchCapsule}
+                  disabled={isCreatingCapsule}
+                  className="btn-forge btn-primary mt-4 w-full py-2.5 text-[10.5px]"
+                >
+                  {isCreatingCapsule
+                    ? "CREATING CAPSULE..."
+                    : activeCapsule
+                    ? "OPEN ACTIVE PREVIEW →"
+                    : "LAUNCH PREVIEW CAPSULE →"}
+                </button>
+              </div>
+
+              {/* CHOICE 2: FIND PERMANENT HOSTING */}
+              <div className="flex flex-col justify-between rounded-xl border border-forge-gold/50 bg-forge-gold/5 p-4 transition-all hover:border-forge-gold">
+                <div>
+                  <div className="font-mono-hud text-[9px] font-bold tracking-widest text-forge-gold">
+                    CHOICE 2 // DEPLOYMENT
+                  </div>
+                  <h4 className="mt-1 font-display text-base font-semibold text-pearl">
+                    Find Permanent Hosting
+                  </h4>
+                  <p className="mt-2 text-[11px] text-forge-dim leading-relaxed">
+                    Answer our brief Deployment Questionnaire to receive evidence-based provider recommendations and export checklists.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvisorModal(true)}
+                  className="btn-forge btn-gold mt-4 w-full py-2.5 text-[10.5px]"
+                >
+                  START QUESTIONNAIRE →
+                </button>
+              </div>
+
+              {/* CHOICE 3: DOWNLOAD MY PROJECT */}
+              <div className="flex flex-col justify-between rounded-xl border border-seam bg-depth/70 p-4 transition-all hover:border-pearl">
+                <div>
+                  <div className="font-mono-hud text-[9px] font-bold tracking-widest text-forge-dim">
+                    CHOICE 3 // INDEPENDENT
+                  </div>
+                  <h4 className="mt-1 font-display text-base font-semibold text-pearl">
+                    Download My Project
+                  </h4>
+                  <p className="mt-2 text-[11px] text-forge-dim leading-relaxed">
+                    Direct deterministic export. Download all verified source files, manifest, and audit results with zero provider lock-in.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => downloadZip(plan.files, plan.appName)}
+                  className="btn-forge btn-ghost mt-4 w-full py-2.5 text-[10.5px]"
+                >
+                  ⬇ DOWNLOAD ZIP
+                </button>
+              </div>
+            </div>
+
+            {/* Ingested context notice */}
+            <div className="mx-auto mt-8 max-w-lg text-left w-full">
               <div className="mb-2 flex items-center justify-between border-b border-seam pb-1.5">
                 <span className="font-mono-hud text-[9px] tracking-[0.22em] text-forge-dim">
                   DOSSIER CONTEXT · INGESTED DURING THE INQUEST
@@ -240,52 +360,62 @@ export default function Deliverables({ plan, auditScore, auditPassed, auditTotal
                 )}
               </div>
               {ingest.length === 0 ? (
-                <div className="py-3 text-center font-mono-hud text-[9.5px] tracking-[0.14em] text-forge-dim/60">
-                  NO CONTEXT ATTACHED — THE QUORUM FORGED FROM THE CONVERSATION ALONE
+                <div className="py-2 text-center font-mono-hud text-[9px] tracking-[0.14em] text-forge-dim/60">
+                  NO CONTEXT ATTACHED — FORGED CONVERSATIONALLY
                 </div>
               ) : (
-                <ul className="max-h-40 space-y-1.5 overflow-y-auto pr-1">
+                <ul className="max-h-28 space-y-1 overflow-y-auto pr-1">
                   {ingest.map((item) => (
                     <li
                       key={item.id}
-                      className="flex items-start gap-2.5 rounded-lg border border-seam/60 bg-depth/50 px-3 py-2"
+                      className="flex items-start gap-2 rounded border border-seam/60 bg-depth/50 px-2.5 py-1.5"
                     >
-                      <span className="mt-0.5 font-mono-hud text-[10px]">{kindIcon(item.kind)}</span>
+                      <span className="text-[10px]">{kindIcon(item.kind)}</span>
                       <div className="min-w-0">
-                        <div className="truncate font-mono-hud text-[10.5px] font-bold tracking-[0.04em] text-pearl">
+                        <div className="truncate font-mono-hud text-[10px] font-bold text-pearl">
                           {item.name}
                         </div>
-                        <div className="text-[9.5px] leading-relaxed text-forge-dim">{item.meta}</div>
+                        <div className="text-[9px] text-forge-dim">{item.meta}</div>
                       </div>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
-            <div className="mt-6 flex flex-col gap-2.5 sm:flex-row">
-              <button onClick={() => downloadZip(plan.files, plan.appName)} className="btn-forge btn-gold px-7 py-3.5 text-[11px]">
-                ⬇ DOWNLOAD ZIP
+
+            <div className="mt-6 flex justify-center">
+              <button
+                type="button"
+                onClick={onNewForge}
+                className="font-mono-hud text-[10px] text-forge-dim hover:text-pearl tracking-widest"
+              >
+                START A NEW FORGE →
               </button>
-              <button onClick={onNewForge} className="btn-forge btn-ghost px-6 py-3.5 text-[11px]">
-                NEW FORGE →
-              </button>
-            </div>
-            <div className="mt-6 grid w-full max-w-lg grid-cols-4 divide-x divide-seam rounded-lg border border-seam bg-depth/60">
-              {[
-                ["QUORUM", `${plan.experts.length}`],
-                ["PHASES", `${plan.phases.length}`],
-                ["CONTEXT", `${ingest.length}`],
-                ["VERDICT", "SEALED"],
-              ].map(([k, v]) => (
-                <div key={k} className="px-3 py-3">
-                  <div className="font-mono-hud text-[8.5px] tracking-[0.2em] text-forge-dim">{k}</div>
-                  <div className="mt-1 font-mono-hud text-[12px] font-bold text-forge-cyan">{v}</div>
-                </div>
-              ))}
             </div>
           </div>
         )}
       </div>
+
+      {/* MODALS */}
+      {showPreviewModal && activeCapsule && (
+        <PreviewCapsuleModal
+          capsule={activeCapsule}
+          onClose={() => setShowPreviewModal(false)}
+          onExtend={handleExtendCapsule}
+          onDelete={handleDeleteCapsule}
+          onOpenQuestionnaire={() => {
+            setShowPreviewModal(false);
+            setShowAdvisorModal(true);
+          }}
+        />
+      )}
+
+      {showAdvisorModal && (
+        <DeploymentAdvisorModal
+          plan={plan}
+          onClose={() => setShowAdvisorModal(false)}
+        />
+      )}
     </div>
   );
 }

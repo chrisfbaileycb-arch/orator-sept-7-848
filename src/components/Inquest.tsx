@@ -1,16 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { INQUEST_QUESTIONS, phaseOf } from "../lib/inquest";
 import { sanitizeAnswer, INPUT_LIMITS } from "../lib/security";
-import { listen, listeningSupported, orate, strikeSound } from "../lib/voice";
+import { listen, listeningSupported, orate, hush, strikeSound } from "../lib/voice";
 import type { IngestItem, IngestKind } from "../lib/types";
 import OrbOfTheOrator from "./OrbOfTheOrator";
+import { ConversationDock } from "./ConversationDock";
+import { useAudioReactivity } from "../lib/useAudioReactivity";
+import type { OrbInteractionState } from "../lib/audio-types";
+import { oratorVoice } from "../lib/voice-service";
 
 /**
  * THE INQUEST — a stage, not a form.
  * The Orator Orb commands the visual field; its voice is projected beneath it
- * in clean type with a speaking pulse. You answer from a low-profile floating
- * dock — typing, chips, files (never video), a read-only repo, or your voice,
- * which is the natural, primary mode: tap the mic or strike the orb to speak.
+ * in clean type with a speaking pulse. You answer from an enlarged, accessible
+ * floating conversation dock — typing, chips, files (never video), a read-only repo,
+ * or your voice, which is the natural, primary mode: tap the mic or strike the orb to speak.
  * Past exchanges fade out translucent above the orb; a slide-out sheet keeps
  * the full transcript one tap away.
  */
@@ -51,7 +55,6 @@ const ACKS = [
 ];
 
 const BLOCKED_VIDEO = /\.(mp4|mov|webm|mkv|avi|m4v|wmv|flv|3gp|mpeg|mpg)$/i;
-const DOCK_BLUR = "backdrop-blur-xl";
 
 export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplete, onExit }: Props) {
   const doneCount = Object.keys(answers).length;
@@ -67,12 +70,32 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
   const [speaking, setSpeaking] = useState(false);
   const [micState, setMicState] = useState<"idle" | "listening">("idle");
   const [micPartial, setMicPartial] = useState("");
-  const [orbEnergy, setOrbEnergy] = useState(0.22);
+  const [lastSubmissionError, setLastSubmissionError] = useState<string | null>(null);
+  const [failedSubmissionText, setFailedSubmissionText] = useState<string | null>(null);
+  const [wordRippleCount, setWordRippleCount] = useState(0);
+
   const [warn, setWarn] = useState<{ text: string; id: number } | null>(null);
   const [note, setNote] = useState<{ text: string; id: number } | null>(null);
   const [repoOpen, setRepoOpen] = useState(false);
   const [repoUrl, setRepoUrl] = useState("");
   const [showSheet, setShowSheet] = useState(false);
+
+  // Derive explicit Orb interaction state model
+  const orbInteractionState: OrbInteractionState = useMemo(() => {
+    if (warn) return "WARNING";
+    if (mode === "sealing") return "SUCCESS";
+    if (mode === "thinking") return "PROCESSING";
+    if (speaking) return "ORATOR_SPEAKING";
+    if (micState === "listening") {
+      return micPartial.trim().length > 0 ? "USER_SPEAKING" : "LISTENING";
+    }
+    return "IDLE";
+  }, [warn, mode, speaking, micState, micPartial]);
+
+  // Real-time audio reactivity hook
+  const { signal: audioSignal } = useAudioReactivity({
+    state: orbInteractionState,
+  });
 
   const [history, setHistory] = useState<HistoryEntry[]>(() => {
     const seed: HistoryEntry[] = [
@@ -105,6 +128,7 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
   const spokeFirst = useRef(false);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const activeListenHandleRef = useRef<{ stop: () => void } | null>(null);
 
   const later = (ms: number, fn: () => void) => {
     timers.current.push(window.setTimeout(fn, ms));
@@ -113,7 +137,13 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
     setHistory((h) => [...h, { id: histId.current++, tone, text, sub }]);
 
   useEffect(() => {
-    return () => timers.current.forEach((t) => window.clearTimeout(t));
+    return () => {
+      timers.current.forEach((t) => window.clearTimeout(t));
+      if (activeListenHandleRef.current) {
+        activeListenHandleRef.current.stop();
+      }
+      hush();
+    };
   }, []);
 
   // Auto-scroll history sheet
@@ -121,12 +151,7 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
     if (chatBottomRef.current && showSheet) chatBottomRef.current.scrollTop = chatBottomRef.current.scrollHeight;
   }, [history, showSheet]);
 
-  // Orb energy tracks state
-  useEffect(() => {
-    setOrbEnergy(mode === "sealing" ? 1 : mode === "thinking" ? 0.85 : speaking ? 0.6 : micState === "listening" ? 0.7 : 0.22);
-  }, [mode, speaking, micState]);
-
-  // When a new question arrives, the Orator speaks it aloud (if voice is on)
+  // When a new question arrives, the Orator speaks it aloud
   const qid = current?.id ?? null;
   useEffect(() => {
     if (!current) return;
@@ -160,75 +185,123 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
     return () => window.clearTimeout(t);
   }, [note]);
 
+  // Submission handler with draft preservation and error recovery
   const send = (raw: string) => {
     const q = current;
     if (!q || mode !== "awaiting" || sealingRef.current) return;
-    const value = sanitizeAnswer(raw, limitOf(q.id));
-    if (!value) {
+
+    if (!raw.trim()) {
       flashWarn("THE ORATOR REQUIRES AN ANSWER — EVEN A FRAGMENT WILL DO");
       return;
     }
-    setDraft("");
-    setAck(ACKS[Math.min(doneCount, ACKS.length - 1)]);
-    setMode("thinking");
-    pushHist("user", value);
-    strikeSound(0.55);
-    onAnswer(q.id, value);
 
-    if (doneCount >= INQUEST_QUESTIONS.length - 1) {
-      // Fifteenth answer — seal the inquest
-      const t1 = window.setTimeout(() => {
-        setAck("All fifteen answers sealed.");
-        pushHist("sys", "ALL FIFTEEN ANSWERS SEALED — CONVENING THE QUORUM…");
-      }, 700);
-      timers.current.push(t1);
-      const t2 = window.setTimeout(() => {
-        setAck(null);
-        setMode("sealing");
-      }, 1350);
-      timers.current.push(t2);
-      const t3 = window.setTimeout(() => {
-        if (!sealingRef.current) {
-          sealingRef.current = true;
-          onComplete();
-        }
-      }, 2500);
-      timers.current.push(t3);
+    const value = sanitizeAnswer(raw, limitOf(q.id));
+    if (!value) {
+      setLastSubmissionError("Input contained prohibited characters or was completely filtered");
+      setFailedSubmissionText(raw);
+      flashWarn("THE ORATOR REQUIRES A VALID ANSWER");
       return;
     }
 
-    timers.current.push(window.setTimeout(() => {
-      setAck(null);
+    try {
+      // Clear error states on accepted submission
+      setLastSubmissionError(null);
+      setFailedSubmissionText(null);
+      setDraft("");
+      setMicPartial("");
+      setAck(ACKS[Math.min(doneCount, ACKS.length - 1)]);
+      setMode("thinking");
+      pushHist("user", value);
+      strikeSound(0.55);
+
+      onAnswer(q.id, value);
+
+      if (doneCount >= INQUEST_QUESTIONS.length - 1) {
+        // Fifteenth answer — seal the inquest
+        const t1 = window.setTimeout(() => {
+          setAck("All fifteen answers sealed.");
+          pushHist("sys", "ALL FIFTEEN ANSWERS SEALED — CONVENING THE QUORUM…");
+        }, 700);
+        timers.current.push(t1);
+        const t2 = window.setTimeout(() => {
+          setAck(null);
+          setMode("sealing");
+        }, 1350);
+        timers.current.push(t2);
+        const t3 = window.setTimeout(() => {
+          if (!sealingRef.current) {
+            sealingRef.current = true;
+            onComplete();
+          }
+        }, 2500);
+        timers.current.push(t3);
+        return;
+      }
+
+      timers.current.push(
+        window.setTimeout(() => {
+          setAck(null);
+          setMode("awaiting");
+        }, 720)
+      );
+    } catch (err) {
+      // Submission failure: preserve draft and display recoverable error
+      setDraft(raw);
+      setFailedSubmissionText(raw);
+      setLastSubmissionError(err instanceof Error ? err.message : "Failed to record answer");
       setMode("awaiting");
-    }, 720));
+    }
   };
 
-  const questionLimit = limitOf(current?.id ?? "q1");
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey && mode === "awaiting") {
-      e.preventDefault();
-      send(draft);
+  const retryLastSubmission = () => {
+    if (failedSubmissionText) {
+      send(failedSubmissionText);
     }
   };
 
   // ---- Voice: the primary mode ----
-  const startListen = () => {
+  const startListen = useCallback(() => {
     if (micState === "listening" || mode !== "awaiting") return;
     setMicPartial("");
     setMicState("listening");
-    listen((partial) => setMicPartial(partial))
-      .then(({ text }) => {
+
+    // Cancel any active Orator speech when the user starts speaking
+    hush();
+    setSpeaking(false);
+
+    listen({
+      onPartial: (partial) => {
+        setMicPartial(partial);
+      },
+      onWord: () => {
+        // Trigger subtle wave shockwave across the orb
+        setWordRippleCount((c) => c + 1);
+      },
+    })
+      .then(({ text, handle }) => {
+        activeListenHandleRef.current = null;
         setMicState("idle");
         setMicPartial("");
-        if (text) send(text);
+        if (text) {
+          send(text);
+        }
       })
-      .catch(() => {
+      .catch((err) => {
+        activeListenHandleRef.current = null;
         setMicState("idle");
         setMicPartial("");
-        flashWarn("The microphone is shy — type instead.");
+        flashWarn("Microphone unavailable or permission denied — you can type comfortably below.");
       });
-  };
+  }, [micState, mode]);
+
+  const cancelListen = useCallback(() => {
+    if (activeListenHandleRef.current) {
+      activeListenHandleRef.current.stop();
+      activeListenHandleRef.current = null;
+    }
+    setMicState("idle");
+    setMicPartial("");
+  }, []);
 
   // ---- Attachments (documents, code, images — video explicitly blocked) ----
   const onFiles = (list: FileList | null) => {
@@ -284,9 +357,10 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
 
   const verseId = qid ?? "sealed";
   const busy = mode !== "awaiting";
+  const questionLimit = limitOf(current?.id ?? "q1");
 
   return (
-    <div className="relative mx-auto flex min-h-screen w-full flex-col px-4 pb-52 pt-24 sm:px-6">
+    <div className="relative mx-auto flex min-h-screen w-full flex-col px-4 pb-64 pt-20 sm:px-6">
       {/* Celestial light emanating outward from the orb */}
       <div aria-hidden className="sanctum-aureole pointer-events-none fixed inset-0" />
 
@@ -308,16 +382,20 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
 
         {/* The Orator commands the field */}
         <OrbOfTheOrator
-          className="mx-auto w-[min(76vw,520px)]"
-          energy={orbEnergy}
+          className="mx-auto w-[min(70vw,480px)]"
+          audioSignal={audioSignal}
+          wordPulseCount={wordRippleCount}
           onStrike={() => {
-            if (listeningSupported()) startListen();
+            if (listeningSupported()) {
+              if (micState === "listening") cancelListen();
+              else startListen();
+            }
           }}
           showWakeLine={false}
         />
 
         {/* Voice projection — clean, high-contrast, beneath the orb */}
-        <div className="mt-6 min-h-[7.5rem] w-full max-w-3xl text-center sm:min-h-[8.5rem]">
+        <div className="mt-4 min-h-[6.5rem] w-full max-w-3xl text-center sm:min-h-[7.5rem]">
           {mode === "sealing" ? (
             <div key="seal" className="orb-verse">
               <div className="speak-bars mx-auto mb-4 h-5">
@@ -333,7 +411,7 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
           ) : current ? (
             <div key={verseId} className="orb-verse">
               {/* Speaking pulse sits with the question */}
-              <div className="mb-3 flex items-center justify-center gap-3">
+              <div className="mb-2.5 flex items-center justify-center gap-3">
                 {speaking || mode === "thinking" ? (
                   <span className="speak-bars h-3.5" aria-label="The Orator is speaking">
                     <span /><span /><span /><span /><span />
@@ -345,7 +423,7 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
               <h2 className="mx-auto max-w-2xl font-display text-[22px] font-semibold leading-snug tracking-tight text-pearl sm:text-[30px]">
                 {current.prompt}
               </h2>
-              <p className="mx-auto mt-3 max-w-lg text-[13px] leading-relaxed text-forge-dim">
+              <p className="mx-auto mt-2 max-w-lg text-[13px] leading-relaxed text-forge-dim">
                 {current.hint}
               </p>
               {ack && mode === "thinking" && (
@@ -372,174 +450,106 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
       </div>
 
       {/* ============ Floating response dock ============ */}
-      <div className="fixed inset-x-0 bottom-4 z-30 flex justify-center px-4 sm:bottom-6">
-        <div className="w-full max-w-xl">
-          {/* Quick-select chips float just above the pill */}
-          {current && current.suggestions && current.suggestions.length > 0 && !busy && (
-            <div className="mb-2 flex flex-wrap justify-center gap-1.5">
-              {current.suggestions.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => send(s)}
-                  className={`rounded-full border border-seam/80 px-3.5 py-1.5 font-mono-hud text-[10px] text-forge-dim transition-colors hover:border-forge-cyan/50 hover:text-pearl ${DOCK_BLUR} bg-depth/50`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
+      <ConversationDock
+        draft={draft}
+        onDraftChange={setDraft}
+        onSubmit={send}
+        disabled={!current || busy}
+        busy={busy}
+        maxLength={questionLimit}
+        placeholder={current?.placeholder ?? "The inquest is complete."}
+        suggestions={current?.suggestions ?? []}
+        micState={micState}
+        micPartial={micPartial}
+        onStartListen={startListen}
+        onCancelListen={cancelListen}
+        micSupported={listeningSupported()}
+        showTranscript={showSheet}
+        onToggleTranscript={() => setShowSheet((s) => !s)}
+        repoOpen={repoOpen}
+        onToggleRepo={() => setRepoOpen((r) => !r)}
+        repoUrl={repoUrl}
+        onRepoUrlChange={setRepoUrl}
+        onConnectRepo={connectRepo}
+        onTriggerFileAttach={() => fileRef.current?.click()}
+        lastError={lastSubmissionError}
+        onRetry={retryLastSubmission}
+      />
 
-          {/* Repo inline connect */}
-          {repoOpen && (
-            <div className={`mb-2 flex items-center gap-2 rounded-2xl border border-seam/80 bg-depth/75 p-2 ${DOCK_BLUR}`}>
-              <input
-                value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") connectRepo();
-                }}
-                placeholder="https://github.com/owner/repo · git@github.com:owner/repo.git"
-                className="input-forge !border-transparent !py-2 font-mono-hud text-[11px]"
-                autoFocus
-              />
-              <button onClick={connectRepo} className="btn-forge btn-primary shrink-0 px-4 py-2 text-[9px]">
-                INGEST (RO)
-              </button>
-            </div>
-          )}
-
-          {/* The pill */}
-          <div className={`flex items-center gap-1.5 rounded-full border border-seam/90 bg-depth/80 py-1.5 pl-2 pr-2 shadow-[0_12px_48px_rgba(3,6,12,0.7)] ${DOCK_BLUR}`}>
-            {/* Voice — primary mode */}
-            {listeningSupported() ? (
-              <button
-                onClick={startListen}
-                aria-label={micState === "listening" ? "Listening…" : "Answer with your voice"}
-                title="Answer with your voice"
-                className={`btn-forge shrink-0 rounded-full px-4 py-2.5 text-[10px] ${
-                  micState === "listening" ? "btn-gold animate-pulse-soft" : "btn-gold"
-                }`}
-              >
-                {micState === "listening" ? (
-                  <span className="flex items-center gap-2">
-                    <span className="speak-bars h-3"><span /><span /><span /></span>
-                    HEARING
-                  </span>
-                ) : (
-                  "🎙 SPEAK"
-                )}
-              </button>
-            ) : (
-              <span className="shrink-0 rounded-full px-2 font-mono-hud text-[9px] text-forge-dim/50">NO MIC</span>
-            )}
-
-            {/* Type pill */}
-            <div className="relative min-w-0 flex-1">
-              <input
-                value={micState === "listening" && micPartial ? micPartial : draft}
-                onChange={(e) => setDraft(e.target.value)}
-                onKeyDown={onKeyDown}
-                placeholder={
-                  micState === "listening"
-                    ? "Speak now — the Orator hears you…"
-                    : current?.placeholder ?? "The inquest is complete."
-                }
-                disabled={!current || busy}
-                maxLength={current ? questionLimit : 600}
-                className="w-full border-0 bg-transparent px-2 py-2 font-mono-hud text-[12px] text-pearl outline-none placeholder:text-forge-dim/60"
-              />
-            </div>
-
-            {/* Transcript sheet */}
-            <button
-              onClick={() => setShowSheet((v) => !v)}
-              aria-label="Conversation transcript"
-              title="Conversation transcript"
-              className={`shrink-0 rounded-full px-2.5 py-2 text-[12px] transition-colors ${
-                showSheet ? "text-forge-cyan" : "text-forge-dim hover:text-forge-cyan"
-              }`}
-            >
-              ☰
-            </button>
-
-            {/* Read-only repo connect */}
-            <button
-              onClick={() => setRepoOpen((o) => !o)}
-              aria-label="Connect repository (read-only)"
-              title="Connect repository — read-only, no push or write"
-              className={`shrink-0 rounded-full px-2.5 py-2 text-[13px] transition-colors ${
-                repoOpen ? "text-forge-gold" : "text-forge-dim hover:text-forge-gold"
-              }`}
-            >
-              🔗
-            </button>
-
-            {/* Attach — no video */}
-            <button
-              onClick={() => fileRef.current?.click()}
-              aria-label="Attach files or images (video blocked)"
-              title="Attach documents, code, or images — video blocked"
-              className="shrink-0 rounded-full px-2.5 py-2 text-[13px] text-forge-dim transition-colors hover:text-forge-cyan"
-            >
-              📎
-            </button>
-          </div>
-
-          {/* Warnings / confirmations */}
-          <div className="mt-2 flex min-h-[1.4rem] justify-center">
-            {warn && (
-              <span key={warn.id} className="animate-drift-up rounded-full border border-forge-alert/40 bg-forge-alert/10 px-3 py-1 font-mono-hud text-[9.5px] tracking-[0.08em] text-forge-alert">
-                ⚠ {warn.text}
-              </span>
-            )}
-            {note && !warn && (
-              <span key={note.id} className="animate-drift-up rounded-full border border-forge-cyan/30 bg-forge-cyan/5 px-3 py-1 font-mono-hud text-[9.5px] tracking-[0.08em] text-forge-cyan/80">
-                ✓ {note.text}
-              </span>
-            )}
-          </div>
-        </div>
+      {/* Warnings / confirmations */}
+      <div className="fixed bottom-1 left-0 right-0 z-20 flex justify-center pointer-events-none">
+        {warn && (
+          <span
+            key={warn.id}
+            role="alert"
+            className="animate-drift-up rounded-full border border-forge-alert/40 bg-forge-alert/15 px-3.5 py-1 font-mono-hud text-[10px] tracking-[0.08em] text-forge-alert shadow-lg backdrop-blur-md"
+          >
+            ⚠ {warn.text}
+          </span>
+        )}
+        {note && !warn && (
+          <span
+            key={note.id}
+            className="animate-drift-up rounded-full border border-forge-cyan/30 bg-forge-cyan/10 px-3.5 py-1 font-mono-hud text-[10px] tracking-[0.08em] text-forge-cyan/90 shadow-lg backdrop-blur-md"
+          >
+            ✓ {note.text}
+          </span>
+        )}
       </div>
 
       {/* ============ Optional transcript sheet ============ */}
       {showSheet && (
-        <div className="fixed bottom-36 right-3 top-24 z-40 w-[min(88vw,330px)] overflow-hidden rounded-2xl border border-seam/70 bg-abyss/80 shadow-[0_18px_60px_rgba(3,6,12,0.8)] backdrop-blur-xl">
-          <div className="flex items-center justify-between border-b border-seam/70 px-4 py-2.5">
-            <span className="font-mono-hud text-[9px] tracking-[0.22em] text-forge-dim">
+        <aside
+          aria-label="Inquest conversation transcript"
+          className="fixed bottom-36 right-4 top-20 z-40 w-[min(90vw,360px)] overflow-hidden rounded-2xl border border-seam/70 bg-abyss/90 shadow-[0_18px_60px_rgba(3,6,12,0.85)] backdrop-blur-2xl flex flex-col"
+        >
+          <div className="flex items-center justify-between border-b border-seam/70 px-4 py-3 bg-depth/50">
+            <span className="font-mono-hud text-[10px] tracking-[0.22em] text-pearl font-semibold">
               INQUEST TRANSCRIPT
             </span>
-            <span className="font-mono-hud text-[9px] text-forge-cyan/80">{doneCount}/15</span>
+            <div className="flex items-center gap-3">
+              <span className="font-mono-hud text-[9px] text-forge-cyan/80">{doneCount}/15</span>
+              <button
+                type="button"
+                onClick={() => setShowSheet(false)}
+                className="text-forge-dim hover:text-pearl transition-colors"
+                aria-label="Close transcript"
+              >
+                ✕
+              </button>
+            </div>
           </div>
-          <div ref={chatBottomRef} className="h-full space-y-2.5 overflow-y-auto px-4 py-3">
+          <div ref={chatBottomRef} className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
             {history.map((h) => (
               <div key={h.id}>
                 {h.tone === "attach" ? (
-                  <div className="rounded-lg border border-forge-gold/25 bg-forge-gold/5 px-3 py-1.5">
-                    <div className="font-mono-hud text-[9.5px] font-bold text-forge-gold">{h.text}</div>
-                    {h.sub && <div className="text-[9px] text-forge-dim">{h.sub}</div>}
+                  <div className="rounded-lg border border-forge-gold/30 bg-forge-gold/10 px-3 py-2">
+                    <div className="font-mono-hud text-[10px] font-bold text-forge-gold">{h.text}</div>
+                    {h.sub && <div className="text-[9px] text-forge-dim mt-0.5">{h.sub}</div>}
                   </div>
                 ) : h.tone === "sys" ? (
-                  <div className="text-center font-mono-hud text-[8.5px] tracking-[0.14em] text-forge-dim">
+                  <div className="text-center font-mono-hud text-[8.5px] tracking-[0.14em] text-forge-dim py-1">
                     {h.text}
                   </div>
                 ) : h.tone === "orator" ? (
-                  <div className="border-l-2 border-forge-cyan/40 pl-2.5">
-                    <div className="text-[10.5px] leading-snug text-pearl/90">{h.text}</div>
-                    {h.sub && <div className="mt-0.5 font-mono-hud text-[8px] tracking-[0.18em] text-forge-dim/70">{h.sub}</div>}
+                  <div className="border-l-2 border-forge-cyan/50 pl-3 py-0.5">
+                    <div className="text-[11px] leading-snug text-pearl/90">{h.text}</div>
+                    {h.sub && <div className="mt-0.5 font-mono-hud text-[8.5px] tracking-[0.18em] text-forge-dim/70">{h.sub}</div>}
                   </div>
                 ) : (
-                  <div className="text-right text-[10.5px] italic leading-snug text-forge-cyan/85">
+                  <div className="text-right text-[11.5px] italic leading-snug text-forge-cyan/90 pl-6">
                     {h.text}
                   </div>
                 )}
               </div>
             ))}
           </div>
-        </div>
+        </aside>
       )}
 
       {/* Exit */}
       <button
+        type="button"
         onClick={onExit}
         className="fixed bottom-3 left-3 z-30 font-mono-hud text-[9px] tracking-[0.18em] text-forge-dim/70 transition-colors hover:text-forge-alert"
         title="Abandon inquest"

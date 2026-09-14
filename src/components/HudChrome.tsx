@@ -48,9 +48,9 @@ export default function HudChrome({ telemetry, alerts, remainingFree, isChartere
             <VoiceConduit />
             <span className="hidden rounded-md border border-seam px-2.5 py-1 font-mono-hud text-[10px] tracking-[0.12em] text-forge-dim sm:block">
               {isChartered ? (
-                <span className="text-forge-gold">CHARTERED ✦</span>
+                <span className="text-forge-gold">BUILD PASS ACTIVE ✦</span>
               ) : (
-                <>PRACTICE BUILDS: <span className="text-pearl">{remainingFree}/3</span></>
+                <>DESIGN EXPLORATIONS: <span className="text-pearl">{remainingFree}/3</span></>
               )}
             </span>
             <button onClick={onBook} className="btn-forge btn-ghost px-3 py-1.5 text-[10px]">

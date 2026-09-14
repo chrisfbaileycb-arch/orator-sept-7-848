@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createOrb, type OrbHandle } from "../canvas/orb";
 import { strikeSound, setDroneEnergy } from "../lib/voice";
+import type { AudioSignal } from "../lib/audio-types";
 
 /**
  * ORB OF THE ORATOR — the centerpiece.
@@ -15,6 +16,10 @@ import { strikeSound, setDroneEnergy } from "../lib/voice";
 interface Props {
   /** 0..1 sustained dialogue energy — swirl speed, gold bloom, wake state. */
   energy?: number;
+  /** Live audio reactivity signal from microphone or Orator speech */
+  audioSignal?: AudioSignal;
+  /** Counter or flag that triggers a restrained word shockwave ripple */
+  wordPulseCount?: number;
   /** Caption under the orb (e.g. "LISTENING…", "FORGING…"). */
   caption?: string;
   /** Sub-caption line. */
@@ -35,6 +40,8 @@ const WAKE_LINES = [
 
 export default function OrbOfTheOrator({
   energy = 0,
+  audioSignal,
+  wordPulseCount = 0,
   caption,
   sub,
   onStrike,
@@ -61,12 +68,28 @@ export default function OrbOfTheOrator({
     };
   }, []);
 
-  // External energy drives a pulse into the orb surface.
+  // Audio reactivity signal feeds directly into WebGL shader uniforms
   useEffect(() => {
     const orb = orbRef.current;
-    if (!orb || energy <= 0) return;
-    orb.pulse(Math.min(1, energy));
-  }, [energy]);
+    if (!orb) return;
+    if (audioSignal) {
+      orb.setAudioSignal({
+        low: audioSignal.low,
+        mid: audioSignal.mid,
+        high: audioSignal.high,
+        energy: Math.max(energy, audioSignal.normalizedEnergy),
+      });
+    } else if (energy > 0) {
+      orb.pulse(Math.min(1, energy));
+    }
+  }, [audioSignal, energy]);
+
+  // Trigger surface word ripple on new interim speech tokens
+  useEffect(() => {
+    if (wordPulseCount > 0) {
+      orbRef.current?.triggerWordRipple();
+    }
+  }, [wordPulseCount]);
 
   // Strike = the special event: flash, wake line, crystal chime, escalate energy.
   const strike = () => {

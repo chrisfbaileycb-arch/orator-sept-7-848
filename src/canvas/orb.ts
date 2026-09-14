@@ -12,10 +12,23 @@
 
 export type OrbState = "idle" | "awake" | "dialogue";
 
+export interface OrbSignalInput {
+  low?: number;
+  mid?: number;
+  high?: number;
+  amplitude?: number;
+  energy?: number;
+  isSpeechActive?: boolean;
+}
+
 export interface OrbHandle {
   destroy: () => void;
-  /** Push an external energy impulse (0..1) — driven by forge phases. */
+  /** Push an external energy impulse (0..1) — driven by forge phases or strikes. */
   pulse: (amount: number) => void;
+  /** Update live audio metrics from the audio reactivity engine */
+  setAudioSignal: (signal: OrbSignalInput) => void;
+  /** Trigger a restrained ripple upon receiving an interim word */
+  triggerWordRipple: () => void;
 }
 
 const VERT = `
@@ -40,6 +53,10 @@ varying vec3 vPos;
 
 uniform float uTime;
 uniform float uEnergy;
+uniform float uLow;
+uniform float uMid;
+uniform float uHigh;
+uniform float uWordRipple;
 uniform vec3  uPointer;
 uniform float uPointerOn;
 uniform vec3  uCam;
@@ -80,9 +97,9 @@ void main() {
   vec3 n = normalize(vNormal);
   vec3 viewDir = normalize(uCam - vPos);
 
-  // Domain-warped fbm swirl across the sphere surface
-  vec3 p = n * 2.4;
-  float t = uTime * (0.10 + uEnergy * 0.35);
+  // Domain-warped fbm swirl across the sphere surface - mid frequencies modulate surface turbulence
+  vec3 p = n * (2.4 + uMid * 0.4);
+  float t = uTime * (0.10 + uEnergy * 0.35 + uLow * 0.20);
   vec3 warp = vec3(
     fbm(p + vec3(0.0, t, 0.0)),
     fbm(p + vec3(5.2, t * 1.3, 1.3)),
@@ -99,7 +116,15 @@ void main() {
 
   vec3 col = mix(deep, cyan, smoothstep(0.15, 0.55, band));
   col = mix(col, pearl, smoothstep(0.55, 0.80, band));
-  col = mix(col, gold, smoothstep(0.80, 0.95, band) * (0.30 + uEnergy * 0.55));
+  col = mix(col, gold, smoothstep(0.80, 0.95, band) * (0.30 + uEnergy * 0.55 + uMid * 0.35));
+
+  // Word ripple shockwave ring traveling across the orb surface
+  if (uWordRipple > 0.001) {
+    float waveDist = length(vPos.xy);
+    float ring = sin(waveDist * 16.0 - (1.0 - uWordRipple) * 12.0);
+    float wave = smoothstep(0.7, 1.0, ring) * uWordRipple;
+    col += wave * vec3(0.4, 0.95, 1.0) * 0.75;
+  }
 
   // Pointer touch: a soft luminous ripple where the user disturbs the plasma
   if (uPointerOn > 0.001) {
@@ -108,16 +133,16 @@ void main() {
     col += touch * vec3(0.85, 0.95, 1.0) * 0.9;
   }
 
-  // Fresnel rim — pearlescent edge glow, warms with energy
-  float fres = pow(1.0 - max(dot(n, viewDir), 0.0), 2.6);
-  col += fres * mix(vec3(0.25, 0.65, 0.90), vec3(0.95, 0.80, 0.50), uEnergy * 0.5) * 0.9;
+  // Fresnel rim — pearlescent edge glow, high frequencies intensify edge shimmer
+  float fres = pow(1.0 - max(dot(n, viewDir), 0.0), 2.6 - uHigh * 0.6);
+  col += fres * mix(vec3(0.25, 0.65, 0.90), vec3(0.95, 0.80, 0.50), (uEnergy + uHigh) * 0.5) * (0.9 + uHigh * 0.4);
 
   // Soft top-light for form
   float diff = max(dot(n, normalize(vec3(0.3, 0.8, 0.5))), 0.0);
   col *= 0.55 + 0.45 * diff;
 
-  // Energy breathing
-  col *= 0.85 + 0.30 * uEnergy;
+  // Energy breathing: low frequencies add deep body glow
+  col *= 0.85 + 0.30 * uEnergy + uLow * 0.25;
 
   // Deep-space tone mapping
   col = col / (col + vec3(0.85));
@@ -184,7 +209,12 @@ function orbModel(scale: number, tilt: number, spinY: number): Float32Array {
 
 export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
   const gl = canvas.getContext("webgl", { antialias: true, alpha: true, premultipliedAlpha: false });
-  const dead: OrbHandle = { destroy: () => undefined, pulse: () => undefined };
+  const dead: OrbHandle = {
+    destroy: () => undefined,
+    pulse: () => undefined,
+    setAudioSignal: () => undefined,
+    triggerWordRipple: () => undefined,
+  };
   if (!gl) return dead;
 
   const compile = (type: number, src: string): WebGLShader | null => {
@@ -231,6 +261,10 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
     model: gl.getUniformLocation(prog, "uModel"),
     time: gl.getUniformLocation(prog, "uTime"),
     energy: gl.getUniformLocation(prog, "uEnergy"),
+    low: gl.getUniformLocation(prog, "uLow"),
+    mid: gl.getUniformLocation(prog, "uMid"),
+    high: gl.getUniformLocation(prog, "uHigh"),
+    wordRipple: gl.getUniformLocation(prog, "uWordRipple"),
     pointer: gl.getUniformLocation(prog, "uPointer"),
     pointerOn: gl.getUniformLocation(prog, "uPointerOn"),
     cam: gl.getUniformLocation(prog, "uCam"),
@@ -246,6 +280,13 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
   let energy = 0;
   let energyTarget = 0;
   let pulseEnergy = 0;
+  let wordRipple = 0;
+  let audioLow = 0;
+  let audioMid = 0;
+  let audioHigh = 0;
+  let audioLowTarget = 0;
+  let audioMidTarget = 0;
+  let audioHighTarget = 0;
   let aspect = 1;
   let proj = perspective(0.9, 1, 0.1, 100);
 
@@ -283,10 +324,18 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
     time += 0.016;
     energy += (energyTarget - energy) * 0.04;
     pulseEnergy *= 0.94;
+    if (wordRipple > 0.001) wordRipple *= 0.92;
+    else wordRipple = 0;
+
+    // Smooth audio reactivity targets
+    audioLow += (audioLowTarget - audioLow) * 0.15;
+    audioMid += (audioMidTarget - audioMid) * 0.22;
+    audioHigh += (audioHighTarget - audioHigh) * 0.25;
+
     pointer.on += (pointer.targetOn - pointer.on) * 0.08;
 
     // Spin the touch direction opposite the model rotation for a stable hotspot.
-    const spinY = time * 0.18;
+    const spinY = time * (0.18 + audioLow * 0.08);
     const cb = Math.cos(-spinY);
     const sb = Math.sin(-spinY);
     const vx = pointer.x * 0.9;
@@ -297,7 +346,7 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
     pointerDir[1] = vy / len;
     pointerDir[2] = (vx / len) * sb + (vz / len) * cb;
 
-    const breath = 1 + Math.sin(time * 0.9) * 0.012 + energy * 0.05 + pulseEnergy * 0.12;
+    const breath = 1 + Math.sin(time * 0.9) * 0.012 + energy * 0.05 + pulseEnergy * 0.12 + audioLow * 0.08;
     const model = orbModel(breath, 0.35, spinY);
 
     gl.clearColor(0, 0, 0, 0);
@@ -312,6 +361,10 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
     gl.uniformMatrix4fv(U.model, false, model);
     gl.uniform1f(U.time, time);
     gl.uniform1f(U.energy, Math.min(1, energy + pulseEnergy));
+    gl.uniform1f(U.low, audioLow);
+    gl.uniform1f(U.mid, audioMid);
+    gl.uniform1f(U.high, audioHigh);
+    gl.uniform1f(U.wordRipple, wordRipple);
     gl.uniform3f(U.pointer, pointerDir[0], pointerDir[1], pointerDir[2]);
     gl.uniform1f(U.pointerOn, pointer.on);
     gl.uniform3f(U.cam, 0, 0, camZ);
@@ -334,6 +387,15 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
     },
     pulse: (amount: number) => {
       pulseEnergy = Math.min(1, pulseEnergy + Math.max(0, amount));
+    },
+    setAudioSignal: (sig: OrbSignalInput) => {
+      if (sig.low !== undefined) audioLowTarget = Math.min(1, Math.max(0, sig.low));
+      if (sig.mid !== undefined) audioMidTarget = Math.min(1, Math.max(0, sig.mid));
+      if (sig.high !== undefined) audioHighTarget = Math.min(1, Math.max(0, sig.high));
+      if (sig.energy !== undefined) energyTarget = Math.min(1, Math.max(0, sig.energy));
+    },
+    triggerWordRipple: () => {
+      wordRipple = 1.0;
     },
   };
 }
