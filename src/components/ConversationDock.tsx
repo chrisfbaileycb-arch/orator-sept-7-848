@@ -60,7 +60,7 @@ export function ConversationDock({
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    const nextHeight = Math.min(Math.max(el.scrollHeight, 44), 160);
+    const nextHeight = Math.min(Math.max(el.scrollHeight, 56), 200);
     el.style.height = `${nextHeight}px`;
   }, [draft, micPartial, micState]);
 
@@ -105,7 +105,7 @@ export function ConversationDock({
       aria-label="Inquest conversational dock"
       className="fixed inset-x-0 bottom-4 z-30 flex justify-center px-3 sm:bottom-6 sm:px-6 safe-area-pb pointer-events-auto"
     >
-      <div className="w-full sm:w-[94%] md:w-[84%] lg:w-[68%] max-w-4xl flex flex-col items-center">
+      <div className="mx-auto w-full max-w-4xl flex flex-col items-center">
         {/* Quick-select chips float just above the dock */}
         {suggestions.length > 0 && !busy && micState !== "listening" && (
           <div
@@ -217,7 +217,7 @@ export function ConversationDock({
         )}
 
         {/* Main Conversation Dock Card */}
-        <div className="relative w-full rounded-3xl border border-seam/80 bg-depth/85 p-2 sm:p-2.5 shadow-[0_16px_48px_rgba(2,4,10,0.85)] backdrop-blur-2xl transition-all">
+        <div className="relative w-full rounded-3xl border border-seam/80 bg-depth/85 p-3 sm:p-4 shadow-[0_16px_48px_rgba(2,4,10,0.85)] backdrop-blur-2xl transition-all">
           <div className="flex items-end gap-2">
             {/* Primary Action: Microphone Button */}
             {micSupported ? (
@@ -276,7 +276,7 @@ export function ConversationDock({
                 maxLength={maxLength}
                 rows={1}
                 aria-describedby="char-count"
-                className="w-full resize-none border-0 bg-transparent px-2.5 py-2 font-mono text-[13px] sm:text-[14px] leading-relaxed text-pearl outline-none placeholder:text-forge-dim/55 focus:ring-0 max-h-40 overflow-y-auto"
+                className="w-full resize-none border-0 bg-transparent px-3 py-3 font-mono text-[15px] sm:text-[16px] leading-relaxed text-pearl outline-none placeholder:text-forge-dim/55 focus:ring-0 max-h-52 overflow-y-auto"
               />
             </div>
 

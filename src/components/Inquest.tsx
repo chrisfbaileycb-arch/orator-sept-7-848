@@ -4,6 +4,7 @@ import { sanitizeAnswer, INPUT_LIMITS } from "../lib/security";
 import { listen, listeningSupported, orate, hush, strikeSound } from "../lib/voice";
 import type { IngestItem, IngestKind } from "../lib/types";
 import OrbOfTheOrator from "./OrbOfTheOrator";
+import SoulTruthGraph from "./SoulTruthGraph";
 import { ConversationDock } from "./ConversationDock";
 import { useAudioReactivity } from "../lib/useAudioReactivity";
 import type { OrbInteractionState } from "../lib/audio-types";
@@ -160,7 +161,8 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
       return; // resume/seed: no auto oration on arrival
     }
     setSpeaking(true);
-    void orate(`${current.prompt} ${current.hint ?? ""}`).then(() => {
+    // The Orator recites its guided, detailed backend script before inviting the answer.
+    void orate(current.script ?? `${current.prompt} ${current.hint ?? ""}`).then(() => {
       later(280, () => setSpeaking(false));
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -364,6 +366,9 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
       {/* Celestial light emanating outward from the orb */}
       <div aria-hidden className="sanctum-aureole pointer-events-none fixed inset-0" />
 
+      {/* The Soul-Truth graph assembles one node per sealed answer */}
+      <SoulTruthGraph doneCount={doneCount} currentIndex={current ? doneCount : null} />
+
       {/* Progress whisper */}
       <div className="relative z-10 mb-2 text-center font-mono-hud text-[9px] tracking-[0.3em] text-forge-dim/80">
         {current ? `${phaseOf(doneCount)} · QUESTION ${String(doneCount + 1).padStart(2, "0")} / 15` : "INQUEST SEALED"}
@@ -382,7 +387,7 @@ export default function Inquest({ answers, ingest, onAnswer, onIngest, onComplet
 
         {/* The Orator commands the field */}
         <OrbOfTheOrator
-          className="mx-auto w-[min(70vw,480px)]"
+          className="mx-auto w-[min(80vw,580px)]"
           audioSignal={audioSignal}
           wordPulseCount={wordRippleCount}
           onStrike={() => {

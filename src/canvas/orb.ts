@@ -36,12 +36,59 @@ attribute vec3 aPos;
 uniform mat4 uProj;
 uniform mat4 uView;
 uniform mat4 uModel;
+uniform float uTime;
+uniform float uEnergy;
+uniform float uLow;
+uniform float uMid;
+uniform float uHigh;
+uniform float uMorph;
 varying vec3 vNormal;
 varying vec3 vPos;
+varying float vDisp;
+
+// Lightweight value noise for organic surface displacement
+float vhash(vec3 p) { return fract(sin(dot(p, vec3(12.9898, 78.233, 45.164))) * 43758.5453); }
+float vnoise(vec3 p) {
+  vec3 i = floor(p);
+  vec3 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float n000 = vhash(i);
+  float n100 = vhash(i + vec3(1.0, 0.0, 0.0));
+  float n010 = vhash(i + vec3(0.0, 1.0, 0.0));
+  float n110 = vhash(i + vec3(1.0, 1.0, 0.0));
+  float n001 = vhash(i + vec3(0.0, 0.0, 1.0));
+  float n101 = vhash(i + vec3(1.0, 0.0, 1.0));
+  float n011 = vhash(i + vec3(0.0, 1.0, 1.0));
+  float n111 = vhash(i + vec3(1.0, 1.0, 1.0));
+  return mix(
+    mix(mix(n000, n100, f.x), mix(n010, n110, f.x), f.y),
+    mix(mix(n001, n101, f.x), mix(n011, n111, f.x), f.y),
+    f.z
+  );
+}
+
 void main() {
-  vec4 world = uModel * vec4(aPos, 1.0);
+  vec3 dir = normalize(aPos);
+
+  // Emotional morph: the orb swells, undulates and shivers as it converses.
+  float t = uTime;
+  float lobes =
+      sin(dir.x * 3.0 + t * 1.20) * 0.5
+    + sin(dir.y * 4.0 - t * 1.05) * 0.5
+    + sin(dir.z * 3.5 + t * 0.90) * 0.5;
+  float turb = vnoise(dir * 2.6 + vec3(0.0, t * 0.55, 0.0)) - 0.5;
+  float shimmer = sin(dir.y * 14.0 + t * 5.0) * uHigh * 0.05;
+
+  float feeling = clamp(uEnergy + uMorph * 0.7, 0.0, 1.4);
+  float amp = 0.03 + feeling * 0.20 + uLow * 0.16 + uMid * 0.06;
+
+  float disp = 1.0 + lobes * amp * 0.42 + turb * amp * 1.25 + shimmer;
+  vDisp = disp - 1.0;
+
+  vec3 pos = dir * disp;
+  vec4 world = uModel * vec4(pos, 1.0);
   vPos = world.xyz;
-  vNormal = normalize(mat3(uModel) * aPos);
+  vNormal = normalize(mat3(uModel) * dir);
   gl_Position = uProj * uView * world;
 }
 `;
@@ -50,6 +97,7 @@ const FRAG = `
 precision mediump float;
 varying vec3 vNormal;
 varying vec3 vPos;
+varying float vDisp;
 
 uniform float uTime;
 uniform float uEnergy;
@@ -141,11 +189,15 @@ void main() {
   float diff = max(dot(n, normalize(vec3(0.3, 0.8, 0.5))), 0.0);
   col *= 0.55 + 0.45 * diff;
 
-  // Energy breathing: low frequencies add deep body glow
-  col *= 0.85 + 0.30 * uEnergy + uLow * 0.25;
+  // Morph crests catch the light — swelling ridges glow, hollows deepen
+  col += smoothstep(0.02, 0.32, vDisp) * vec3(0.55, 0.85, 1.0) * 0.55;
+  col *= 1.0 + clamp(vDisp, -0.3, 0.3) * 0.6;
+
+  // Energy breathing: low frequencies add deep body glow (resting glow keeps it captivating at idle)
+  col *= 1.05 + 0.30 * uEnergy + uLow * 0.25;
 
   // Deep-space tone mapping
-  col = col / (col + vec3(0.85));
+  col = col / (col + vec3(0.70));
   gl_FragColor = vec4(col, 1.0);
 }
 `;
@@ -265,12 +317,13 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
     mid: gl.getUniformLocation(prog, "uMid"),
     high: gl.getUniformLocation(prog, "uHigh"),
     wordRipple: gl.getUniformLocation(prog, "uWordRipple"),
+    morph: gl.getUniformLocation(prog, "uMorph"),
     pointer: gl.getUniformLocation(prog, "uPointer"),
     pointerOn: gl.getUniformLocation(prog, "uPointerOn"),
     cam: gl.getUniformLocation(prog, "uCam"),
   };
 
-  const camZ = 3.0;
+  const camZ = 2.35;
   const view = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -camZ, 1]);
 
   let width = 1;
@@ -346,7 +399,7 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
     pointerDir[1] = vy / len;
     pointerDir[2] = (vx / len) * sb + (vz / len) * cb;
 
-    const breath = 1 + Math.sin(time * 0.9) * 0.012 + energy * 0.05 + pulseEnergy * 0.12 + audioLow * 0.08;
+    const breath = 1.12 + Math.sin(time * 0.9) * 0.016 + energy * 0.06 + pulseEnergy * 0.14 + audioLow * 0.10;
     const model = orbModel(breath, 0.35, spinY);
 
     gl.clearColor(0, 0, 0, 0);
@@ -365,6 +418,7 @@ export function createOrb(canvas: HTMLCanvasElement): OrbHandle {
     gl.uniform1f(U.mid, audioMid);
     gl.uniform1f(U.high, audioHigh);
     gl.uniform1f(U.wordRipple, wordRipple);
+    gl.uniform1f(U.morph, Math.min(1.4, energy + pulseEnergy * 0.9 + audioMid * 0.5 + wordRipple * 0.3));
     gl.uniform3f(U.pointer, pointerDir[0], pointerDir[1], pointerDir[2]);
     gl.uniform1f(U.pointerOn, pointer.on);
     gl.uniform3f(U.cam, 0, 0, camZ);
