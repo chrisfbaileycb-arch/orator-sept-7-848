@@ -156,22 +156,11 @@ export default function App() {
   const tier: "free" | "paid" = session.isChartered ? "paid" : "free";
 
   return (
-    <div className="abyss-vignette isolate relative min-h-screen">
+    <div className="bg-[#07070a] text-pearl isolate relative h-screen w-screen overflow-hidden flex flex-col font-mono-hud">
       <PlasmaBackdrop />
-      <div className="grid-lines pointer-events-none fixed inset-0" />
-      <div className="scanline" />
+      <div className="grid-lines pointer-events-none fixed inset-0 opacity-40" />
 
-      <HudChrome
-        telemetry={telemetry}
-        alerts={alerts}
-        remainingFree={remainingExplorations}
-        isChartered={session.isChartered}
-        onBook={() => setShowBooking(true)}
-        onBench={() => setShowBench(true)}
-        onOpenCortex={() => setShowCortex(true)}
-      />
-
-      <main>
+      <main className="flex-1 min-h-0 relative overflow-hidden">
         {(status === "landing" || status === "booked" || status === "payment_required") && (
           <Landing
             session={session}
@@ -188,44 +177,48 @@ export default function App() {
         )}
 
         {status === "inquest" && (
-          <Inquest
-            answers={session.session.answers}
-            ingest={session.session.ingest}
-            onAnswer={session.recordAnswer}
-            onIngest={session.recordIngest}
-            onComplete={handleInquestComplete}
-            onExit={session.resetSession}
-          />
+          <div className="h-full overflow-y-auto">
+            <Inquest
+              answers={session.session.answers}
+              ingest={session.session.ingest}
+              onAnswer={session.recordAnswer}
+              onIngest={session.recordIngest}
+              onComplete={handleInquestComplete}
+              onExit={session.resetSession}
+            />
+          </div>
         )}
 
         {status === "forging" && plan && !gateOpen && (
-          <ForgeDirector
-            plan={plan}
-            tier={tier}
-            onComplete={handleForgeComplete}
-            onOpenCortex={() => setShowCortex(true)}
-          />
+          <div className="h-full overflow-y-auto">
+            <ForgeDirector
+              plan={plan}
+              tier={tier}
+              onComplete={handleForgeComplete}
+              onOpenCortex={() => setShowCortex(true)}
+            />
+          </div>
         )}
 
         {status === "forging" && plan && gateOpen && audit && (
-          <VerificationGate audit={audit} onSeal={handleGateSealed} />
+          <div className="h-full overflow-y-auto">
+            <VerificationGate audit={audit} onSeal={handleGateSealed} />
+          </div>
         )}
 
         {status === "delivered" && plan && (
-          <Deliverables
-            plan={plan}
-            auditScore={audit?.score ?? 0}
-            auditPassed={audit?.passed ?? 0}
-            auditTotal={audit?.total ?? 0}
-            ingest={session.session.ingest}
-            onNewForge={newForge}
-          />
+          <div className="h-full overflow-y-auto">
+            <Deliverables
+              plan={plan}
+              auditScore={audit?.score ?? 0}
+              auditPassed={audit?.passed ?? 0}
+              auditTotal={audit?.total ?? 0}
+              ingest={session.session.ingest}
+              onNewForge={newForge}
+            />
+          </div>
         )}
       </main>
-
-      <footer className="relative z-10 border-t border-seam/60 py-6 text-center font-mono-hud text-[9px] tracking-[0.22em] text-forge-dim">
-        ORATOR.AI // ORATOR DESIGN STUDIO · 16-EXPERT MoE · COMPLETE ORATOR BUILDS · SECRETS STAY SERVER-SIDE
-      </footer>
 
       {showBooking && (
         <BookingModal

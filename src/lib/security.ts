@@ -46,7 +46,7 @@ export function isValidSlotISO(value: string): boolean {
 
 /** Fail-fast env check for optional live AI routing (never logs values). */
 export function assertLiveRouterEnv(): { ok: boolean; missing: string[] } {
-  const required = ["OPENROUTER_API_KEY"];
-  const missing = required.filter((k) => !import.meta.env[`VITE_${k}`] && k === "OPENROUTER_API_KEY");
+  const required = ["GEMINI_API_KEY"];
+  const missing = required.filter((k) => !import.meta.env[`VITE_${k}`] && k === "GEMINI_API_KEY");
   return { ok: missing.length === 0, missing };
 }

@@ -1,7 +1,11 @@
 /**
- * CORTEX 3D Reasoning Manifold
- * Three.js WebGL Toroidal State Machine with dynamic particle cloud,
- * vector normal rings, and projected 2D HTML callout annotations.
+ * CORTEX 3D Audio-Morphing Vocal Manifold
+ * - Voice-reactive vertex displacement & acoustic morphing via WebGL ShaderMaterial
+ * - Simplex noise displacement along surface normals scaled by vocal frequencies
+ * - Inward sound absorption ripples during user speech
+ * - Real-time Web Audio AnalyserNode integration (globalAudioEngine)
+ * - 3D vector pin projection displaying the active 15-Question Orator Inquest prompt
+ * - High-density emerald-cyan resonance state upon 15-question completion
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -9,45 +13,231 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { CortexPhase, CortexReasoningStep } from "../../lib/cortex/types";
 import { cortexBus } from "../../lib/cortex/bus";
+import { globalAudioEngine } from "../../lib/audio-engine";
 
 interface Props {
-  phase: CortexPhase;
-  consensusScore: number;
-  contextLoadPct: number;
-  tokPerSec: number;
-  reasoningSteps: CortexReasoningStep[];
+  phase?: CortexPhase;
+  consensusScore?: number;
+  contextLoadPct?: number;
+  tokPerSec?: number;
+  reasoningSteps?: CortexReasoningStep[];
   onSelectStep?: (step: CortexReasoningStep) => void;
+  // Audio-reactive vocal entity props
+  isOratorSpeaking?: boolean;
+  isUserSpeaking?: boolean;
+  currentQuestionPrompt?: string;
+  currentQuestionIndex?: number;
+  totalQuestions?: number;
+  isInquestComplete?: boolean;
+  shockwaveTrigger?: number;
+  cleanMode?: boolean;
+  hideBorders?: boolean;
 }
 
-interface ProjectedAnnotation {
-  id: string;
-  step: CortexReasoningStep;
+interface ProjectedPin {
+  label: string;
+  sub: string;
+  tag: string;
   screenX: number;
   screenY: number;
   visible: boolean;
+  colorScheme: "cyan" | "amber" | "magenta" | "emerald";
 }
 
+// -------------------------------------------------------------
+// GLSL Shaders for Dynamic Vertex Displacement & Acoustic Morphing
+// -------------------------------------------------------------
+const TORUS_VERTEX_SHADER = `
+  uniform float uTime;
+  uniform float uAudioLevel;
+  uniform float uSpeechCadence; // 0.0 when silent, 1.0 when Orator speaks
+  uniform float uUserSpeaking;  // 1.0 when user speaks into microphone
+  uniform float uPulseShockwave;// 1.0 decaying shockwave on question advance
+  uniform float uCompleteState; // 1.0 when 15 questions complete
+
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  varying float vDisplacement;
+  varying vec2 vUv;
+
+  // Simplex 3D Noise Functions
+  vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+  vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+  vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+
+  float snoise(vec3 v) {
+    const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+    const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+    vec3 i  = floor(v + dot(v, C.yyy));
+    vec3 x0 = v - i + dot(i, C.xxx);
+    vec3 g = step(x0.yzx, x0.xyz);
+    vec3 l = 1.0 - g;
+    vec3 i1 = min(g.xyz, l.zxy);
+    vec3 i2 = max(g.xyz, l.zxy);
+    vec3 x1 = x0 - i1 + C.xxx;
+    vec3 x2 = x0 - i2 + C.yyy;
+    vec3 x3 = x0 - D.yyy;
+    i = mod289(i);
+    vec4 p = permute(permute(permute(
+               i.z + vec4(0.0, i1.z, i2.z, 1.0))
+             + i.y + vec4(0.0, i1.y, i2.y, 1.0))
+             + i.x + vec4(0.0, i1.x, i2.x, 1.0));
+    float n_ = 0.142857142857;
+    vec3 ns = n_ * D.wyz - D.xzx;
+    vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+    vec4 x_ = floor(j * ns.z);
+    vec4 y_ = floor(j - 7.0 * x_);
+    vec4 x = x_ *ns.x + ns.yyyy;
+    vec4 y = y_ *ns.x + ns.yyyy;
+    vec4 h = 1.0 - abs(x) - abs(y);
+    vec4 b0 = vec4(x.xy, y.xy);
+    vec4 b1 = vec4(x.zw, y.zw);
+    vec4 s0 = floor(b0)*2.0 + 1.0;
+    vec4 s1 = floor(b1)*2.0 + 1.0;
+    vec4 sh = -step(h, vec4(0.0));
+    vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
+    vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
+    vec3 p0 = vec3(a0.xy, h.x);
+    vec3 p1 = vec3(a0.zw, h.y);
+    vec3 p2 = vec3(a1.xy, h.z);
+    vec3 p3 = vec3(a1.zw, h.w);
+    vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+    p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+    vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+    m = m * m;
+    return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
+  }
+
+  void main() {
+    vUv = uv;
+    vNormal = normal;
+
+    // 1. Silent Breathing: gentle, subtle low-frequency oscillation
+    float breath = sin(uTime * 1.5 + position.x * 0.75 + position.y * 0.5) * 0.045;
+
+    // 2. Orator Speaking: outward normal displacement with harmonic noise scaled by vocal frequencies
+    // The ring undulates, breathes, and morphs like a resonant acoustic chamber
+    vec3 sampleCoord = position * 0.85 + vec3(uTime * 2.4, uTime * 1.8, uTime * 2.1);
+    float vocalNoise = snoise(sampleCoord);
+    float oratorDisplacement = vocalNoise * (0.16 + uAudioLevel * 0.55) * uSpeechCadence;
+
+    // 3. User Speaking: inward reactive ripple effect absorbing sound waves into center manifold
+    float rDist = length(position.xy);
+    float inwardRipple = sin(rDist * 4.8 - uTime * 8.0) * (0.10 + uAudioLevel * 0.35) * uUserSpeaking;
+
+    // 4. Question Advance Shockwave
+    float shockwave = sin(uPulseShockwave * 3.14159) * cos(position.x * 2.2) * 0.38;
+
+    // 5. High-density coherent resonance upon 15-question completion
+    float coherentResonance = sin(uTime * 2.2 + position.z * 3.0) * 0.04 * uCompleteState;
+
+    float totalDisp = breath + oratorDisplacement - inwardRipple + shockwave + coherentResonance;
+    vDisplacement = totalDisp;
+
+    vec3 displacedPos = position + normal * totalDisp;
+    vPosition = displacedPos;
+
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(displacedPos, 1.0);
+  }
+`;
+
+const TORUS_FRAGMENT_SHADER = `
+  uniform float uTime;
+  uniform float uAudioLevel;
+  uniform float uSpeechCadence;
+  uniform float uUserSpeaking;
+  uniform float uPulseShockwave;
+  uniform float uCompleteState;
+
+  varying vec3 vNormal;
+  varying vec3 vPosition;
+  varying float vDisplacement;
+  varying vec2 vUv;
+
+  void main() {
+    // Acoustic palette
+    vec3 cyan = vec3(0.208, 0.878, 1.0);     // #35e0ff
+    vec3 amber = vec3(0.961, 0.620, 0.043);   // #f59e0b
+    vec3 magenta = vec3(0.851, 0.275, 0.937); // #d946ef
+    vec3 emerald = vec3(0.063, 0.725, 0.506); // #10b981
+    vec3 obsidian = vec3(0.024, 0.055, 0.10); // #060e1a
+
+    // Dynamic color shift during speech: Cyan -> Electric Amber -> Magenta deliberation
+    vec3 vocalGlow = mix(cyan, amber, clamp(uSpeechCadence * (0.4 + uAudioLevel * 0.9), 0.0, 1.0));
+    vocalGlow = mix(vocalGlow, magenta, clamp(sin(uTime * 3.2 + vPosition.x * 1.5) * 0.5 + 0.5, 0.0, 1.0) * uSpeechCadence);
+
+    // User speech color: electric inward amber
+    vec3 colorStage = mix(vocalGlow, amber, uUserSpeaking * 0.85);
+
+    // Completed state: coherent emerald-cyan resonance state
+    vec3 completeGlow = mix(emerald, cyan, sin(uTime * 2.0) * 0.5 + 0.5);
+    vec3 activeColor = mix(colorStage, completeGlow, uCompleteState);
+
+    // Shockwave pulse highlight
+    activeColor = mix(activeColor, vec3(1.0, 1.0, 1.0), uPulseShockwave * 0.75);
+
+    // Fresnel rim effect
+    vec3 viewDir = normalize(cameraPosition - vPosition);
+    float fresnel = pow(1.0 - max(dot(viewDir, normalize(vNormal)), 0.0), 2.2);
+
+    // Procedural wireframe lattice grid from UVs
+    vec2 grid = abs(fract(vUv * vec2(96.0, 32.0) - 0.5) - 0.5) / fwidth(vUv * vec2(96.0, 32.0));
+    float lineDist = min(grid.x, grid.y);
+    float wireAlpha = 1.0 - min(lineDist, 1.0);
+
+    vec3 surface = mix(obsidian, activeColor, 0.32 + fresnel * 0.68 + abs(vDisplacement) * 2.2);
+    vec3 wire = activeColor * (1.1 + fresnel * 0.5);
+
+    vec3 finalRgb = mix(surface, wire, wireAlpha * 0.65);
+    gl_FragColor = vec4(finalRgb, 0.90);
+  }
+`;
+
 export default function CortexTorus3D({
-  phase,
-  consensusScore,
-  contextLoadPct,
-  tokPerSec,
-  reasoningSteps,
-  onSelectStep,
+  phase = "parse",
+  consensusScore = 0.96,
+  contextLoadPct = 76,
+  tokPerSec = 380,
+  reasoningSteps = [],
+  isOratorSpeaking = false,
+  isUserSpeaking = false,
+  currentQuestionPrompt = 'What is your primary persistence model: local SQLite or multi-tenant cloud?',
+  currentQuestionIndex = 4,
+  totalQuestions = 15,
+  isInquestComplete = false,
+  shockwaveTrigger = 0,
+  cleanMode = true,
+  hideBorders = false,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [annotations, setAnnotations] = useState<ProjectedAnnotation[]>([]);
+  const [projectedPin, setProjectedPin] = useState<ProjectedPin | null>(null);
   const [wireframeMode, setWireframeMode] = useState<boolean>(true);
-  const [particleDensity, setParticleDensity] = useState<"standard" | "dense">("standard");
 
-  // Keep references to Three objects for animation updates
+  // References to Three objects for animation updates
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
-  const torusWireRef = useRef<THREE.Mesh | null>(null);
-  const torusSolidRef = useRef<THREE.Mesh | null>(null);
-  const particlePointsRef = useRef<THREE.Points | null>(null);
-  const particleDataRef = useRef<{
+  const torusMeshRef = useRef<THREE.Mesh | null>(null);
+  const torusMaterialRef = useRef<THREE.ShaderMaterial | null>(null);
+  const normalPointsRef = useRef<THREE.Points | null>(null);
+  const torusPointsRef = useRef<THREE.Points | null>(null);
+
+  // Speech envelope smoothing references
+  const speechCadenceRef = useRef<number>(0);
+  const userSpeakingRef = useRef<number>(0);
+  const shockwaveRef = useRef<number>(0);
+  const completeStateRef = useRef<number>(0);
+
+  // Particle simulation buffers
+  const normalDataRef = useRef<{
+    u: Float32Array;
+    v: Float32Array;
+    dist: Float32Array;
+    speedDist: Float32Array;
+  } | null>(null);
+
+  const driftDataRef = useRef<{
     u: Float32Array;
     v: Float32Array;
     r: Float32Array;
@@ -55,52 +245,36 @@ export default function CortexTorus3D({
     speedV: Float32Array;
   } | null>(null);
 
-  // References to dynamic values without recreation
-  const phaseRef = useRef(phase);
-  phaseRef.current = phase;
-  const consensusRef = useRef(consensusScore);
-  consensusRef.current = consensusScore;
-  const loadRef = useRef(contextLoadPct);
-  loadRef.current = contextLoadPct;
-  const tokRef = useRef(tokPerSec);
-  tokRef.current = tokPerSec;
-  const stepsRef = useRef(reasoningSteps);
-  stepsRef.current = reasoningSteps;
-
-  // Pulse animation state on token
-  const pulseRef = useRef<number>(0);
-
+  // Shockwave trigger effect
   useEffect(() => {
-    const unsub = cortexBus.subscribe((e) => {
-      if (e.type === "onToken") {
-        pulseRef.current = Math.min(1.0, pulseRef.current + 0.15);
-      }
-    });
-    return () => unsub();
-  }, []);
+    if (shockwaveTrigger > 0) {
+      shockwaveRef.current = 1.0;
+    }
+  }, [shockwaveTrigger]);
 
+  // Main Three.js Scene Setup & Morphing Loop
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // 1. Scene Setup
+    // 1. Scene
     const scene = new THREE.Scene();
     sceneRef.current = scene;
-    scene.fog = new THREE.FogExp2(0x060913, 0.08);
+    scene.fog = new THREE.FogExp2(0x03060c, 0.06);
 
-    // 2. Camera Setup
+    // 2. Camera
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 500;
     const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-    camera.position.set(0, 4.2, 7.8);
+    camera.position.set(0, 3.8, 8.2);
     cameraRef.current = camera;
 
-    // 3. Renderer Setup
+    // 3. WebGL Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.2;
+    renderer.toneMappingExposure = 1.3;
     container.innerHTML = "";
     container.appendChild(renderer.domElement);
 
@@ -109,135 +283,61 @@ export default function CortexTorus3D({
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.maxDistance = 14;
-    controls.minDistance = 2.5;
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.8;
+    controls.minDistance = 3.0;
+    controls.autoRotate = false; // We drive rotation through dynamic acoustic resonance!
     controlsRef.current = controls;
 
     // 5. Lighting
-    const ambientLight = new THREE.AmbientLight(0x0b172a, 1.8);
+    const ambientLight = new THREE.AmbientLight(0x0a1424, 2.5);
     scene.add(ambientLight);
 
-    const pointLightCyan = new THREE.PointLight(0x35e0ff, 4, 12);
-    pointLightCyan.position.set(3, 4, 3);
-    scene.add(pointLightCyan);
+    const pointCyan = new THREE.PointLight(0x35e0ff, 5.0, 15);
+    pointCyan.position.set(3, 4, 3);
+    scene.add(pointCyan);
 
-    const pointLightMagenta = new THREE.PointLight(0xec4899, 3, 12);
-    pointLightMagenta.position.set(-3, -2, -3);
-    scene.add(pointLightMagenta);
+    const pointAmber = new THREE.PointLight(0xf59e0b, 4.0, 12);
+    pointAmber.position.set(-3, -2, -2);
+    scene.add(pointAmber);
 
-    const pointLightEmerald = new THREE.PointLight(0x10b981, 2, 10);
-    pointLightEmerald.position.set(0, 0, 0);
-    scene.add(pointLightEmerald);
+    // 6. The Reasoning Torus Geometry (R = 2.8, r = 0.95, high-density mesh for fluid morphing)
+    const R = 2.8;
+    const r = 0.95;
+    const torusGeo = new THREE.TorusGeometry(R, r, 48, 128);
 
-    // 6. The Reasoning Manifold (Torus r1=3, r2=1)
-    const R = 3.0; // Major radius (r1=3)
-    const r = 1.0; // Minor tube radius (r2=1)
-
-    const torusGeo = new THREE.TorusGeometry(3.0, 1.0, 32, 100);
-    
-    // Wireframe lattice mesh
-    const wireMat = new THREE.MeshStandardMaterial({
-      color: 0x35e0ff,
-      emissive: 0x0c314b,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.45,
-      roughness: 0.2,
-      metalness: 0.8,
-    });
-    const torusWire = new THREE.Mesh(torusGeo, wireMat);
-    torusWire.rotation.x = Math.PI / 2.5;
-    scene.add(torusWire);
-    torusWireRef.current = torusWire;
-
-    // Inner translucent core skin
-    const solidMat = new THREE.MeshPhysicalMaterial({
-      color: 0x071526,
-      emissive: 0x051b2c,
-      transparent: true,
-      opacity: 0.35,
-      roughness: 0.1,
-      metalness: 0.9,
-      transmission: 0.6,
-      ior: 1.4,
-    });
-    const torusSolid = new THREE.Mesh(torusGeo, solidMat);
-    torusWire.add(torusSolid);
-    torusSolidRef.current = torusSolid;
-
-    // Equatorial Ring Accent
-    const ringGeo = new THREE.TorusGeometry(R + 0.12, 0.02, 16, 96);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0x35e0ff,
-      transparent: true,
-      opacity: 0.7,
-    });
-    const eqRing = new THREE.Mesh(ringGeo, ringMat);
-    torusWire.add(eqRing);
-
-    // Secondary Poloidal Ring
-    const poloidalGeo = new THREE.TorusGeometry(r + 0.08, 0.015, 16, 64);
-    const poloidalMat = new THREE.MeshBasicMaterial({
-      color: 0xf59e0b,
-      transparent: true,
-      opacity: 0.6,
-    });
-    const polRing = new THREE.Mesh(poloidalGeo, poloidalMat);
-    polRing.rotation.y = Math.PI / 2;
-    polRing.position.x = R;
-    torusWire.add(polRing);
-
-    // 7. Dynamic Particle Point Cloud
-    const particleCount = 2200;
-    const particlePositions = new Float32Array(particleCount * 3);
-    const particleColors = new Float32Array(particleCount * 3);
-
-    const uArr = new Float32Array(particleCount);
-    const vArr = new Float32Array(particleCount);
-    const rArr = new Float32Array(particleCount);
-    const speedUArr = new Float32Array(particleCount);
-    const speedVArr = new Float32Array(particleCount);
-
-    const colorA = new THREE.Color(0x35e0ff); // cyan
-    const colorB = new THREE.Color(0xa855f7); // purple
-    const colorC = new THREE.Color(0x10b981); // emerald
-
-    for (let i = 0; i < particleCount; i++) {
-      uArr[i] = Math.random() * Math.PI * 2;
-      vArr[i] = Math.random() * Math.PI * 2;
-      rArr[i] = r + (Math.random() - 0.5) * 0.35;
-      speedUArr[i] = 0.004 + Math.random() * 0.008;
-      speedVArr[i] = 0.006 + Math.random() * 0.012;
-
-      const px = (R + rArr[i] * Math.cos(vArr[i])) * Math.cos(uArr[i]);
-      const py = (R + rArr[i] * Math.cos(vArr[i])) * Math.sin(uArr[i]);
-      const pz = rArr[i] * Math.sin(vArr[i]);
-
-      particlePositions[i * 3] = px;
-      particlePositions[i * 3 + 1] = py;
-      particlePositions[i * 3 + 2] = pz;
-
-      const t = Math.random();
-      const col = t < 0.5 ? colorA.clone().lerp(colorB, t * 2) : colorB.clone().lerp(colorC, (t - 0.5) * 2);
-      particleColors[i * 3] = col.r;
-      particleColors[i * 3 + 1] = col.g;
-      particleColors[i * 3 + 2] = col.b;
-    }
-
-    particleDataRef.current = {
-      u: uArr,
-      v: vArr,
-      r: rArr,
-      speedU: speedUArr,
-      speedV: speedVArr,
+    // Shader Material with dynamic uniforms
+    const uniforms = {
+      uTime: { value: 0 },
+      uAudioLevel: { value: 0 },
+      uSpeechCadence: { value: 0 },
+      uUserSpeaking: { value: 0 },
+      uPulseShockwave: { value: 0 },
+      uCompleteState: { value: 0 },
     };
 
-    const particleGeometry = new THREE.BufferGeometry();
-    particleGeometry.setAttribute("position", new THREE.BufferAttribute(particlePositions, 3));
-    particleGeometry.setAttribute("color", new THREE.BufferAttribute(particleColors, 3));
+    const morphMaterial = new THREE.ShaderMaterial({
+      vertexShader: TORUS_VERTEX_SHADER,
+      fragmentShader: TORUS_FRAGMENT_SHADER,
+      uniforms,
+      transparent: true,
+      side: THREE.DoubleSide,
+    });
+    torusMaterialRef.current = morphMaterial;
 
-    // Custom circular particle texture via HTML canvas
+    const torusMesh = new THREE.Mesh(torusGeo, morphMaterial);
+    torusMesh.rotation.x = Math.PI / 2.35;
+    scene.add(torusMesh);
+    torusMeshRef.current = torusMesh;
+
+    // Concentric Equatorial Glow Rings
+    const ringGeo = new THREE.TorusGeometry(R + 0.12, 0.018, 16, 96);
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0x35e0ff, transparent: true, opacity: 0.7 });
+    torusMesh.add(new THREE.Mesh(ringGeo, ringMat));
+
+    const ringAmberGeo = new THREE.TorusGeometry(R - 0.12, 0.015, 16, 80);
+    const ringAmberMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.6 });
+    torusMesh.add(new THREE.Mesh(ringAmberGeo, ringAmberMat));
+
+    // Particle Texture Canvas (Soft radial glow)
     const particleCanvas = document.createElement("canvas");
     particleCanvas.width = 32;
     particleCanvas.height = 32;
@@ -245,139 +345,229 @@ export default function CortexTorus3D({
     const grad = pctx.createRadialGradient(16, 16, 0, 16, 16, 16);
     grad.addColorStop(0, "rgba(255, 255, 255, 1)");
     grad.addColorStop(0.35, "rgba(255, 255, 255, 0.85)");
-    grad.addColorStop(0.7, "rgba(53, 224, 255, 0.4)");
+    grad.addColorStop(0.7, "rgba(53, 224, 255, 0.5)");
     grad.addColorStop(1, "rgba(53, 224, 255, 0)");
     pctx.fillStyle = grad;
     pctx.fillRect(0, 0, 32, 32);
-
     const pTexture = new THREE.CanvasTexture(particleCanvas);
 
-    const particleMaterial = new THREE.PointsMaterial({
-      size: 0.1,
-      vertexColors: true,
+    // Layer 1: Normal Radiation Particles (1,400 points)
+    const normalCount = 1400;
+    const normalPositions = new Float32Array(normalCount * 3);
+    const normalColors = new Float32Array(normalCount * 3);
+
+    const normU = new Float32Array(normalCount);
+    const normV = new Float32Array(normalCount);
+    const normDist = new Float32Array(normalCount);
+    const normSpeed = new Float32Array(normalCount);
+
+    const colCyan = new THREE.Color(0x35e0ff);
+    const colAmber = new THREE.Color(0xf59e0b);
+    const colMagenta = new THREE.Color(0xd946ef);
+
+    for (let i = 0; i < normalCount; i++) {
+      normU[i] = Math.random() * Math.PI * 2;
+      normV[i] = Math.random() * Math.PI * 2;
+      normDist[i] = Math.random() * 0.8;
+      normSpeed[i] = 0.007 + Math.random() * 0.012;
+
+      const curR = r + normDist[i];
+      normalPositions[i * 3] = (R + curR * Math.cos(normV[i])) * Math.cos(normU[i]);
+      normalPositions[i * 3 + 1] = (R + curR * Math.cos(normV[i])) * Math.sin(normU[i]);
+      normalPositions[i * 3 + 2] = curR * Math.sin(normV[i]);
+
+      const c = Math.random() > 0.6 ? colAmber : Math.random() > 0.5 ? colMagenta : colCyan;
+      normalColors[i * 3] = c.r;
+      normalColors[i * 3 + 1] = c.g;
+      normalColors[i * 3 + 2] = c.b;
+    }
+
+    const normalGeometry = new THREE.BufferGeometry();
+    normalGeometry.setAttribute("position", new THREE.BufferAttribute(normalPositions, 3));
+    normalGeometry.setAttribute("color", new THREE.BufferAttribute(normalColors, 3));
+
+    const normalMaterial = new THREE.PointsMaterial({
+      size: 0.12,
       map: pTexture,
+      vertexColors: true,
       transparent: true,
-      opacity: 0.88,
+      opacity: 0.85,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
+    const normalPoints = new THREE.Points(normalGeometry, normalMaterial);
+    torusMesh.add(normalPoints);
+    normalPointsRef.current = normalPoints;
+    normalDataRef.current = { u: normU, v: normV, dist: normDist, speedDist: normSpeed };
 
-    const particlePoints = new THREE.Points(particleGeometry, particleMaterial);
-    torusWire.add(particlePoints);
-    particlePointsRef.current = particlePoints;
+    // Layer 2: Toroidal Circulation Particles (1,000 points)
+    const driftCount = 1000;
+    const driftPositions = new Float32Array(driftCount * 3);
+    const driftColors = new Float32Array(driftCount * 3);
+    const driftU = new Float32Array(driftCount);
+    const driftV = new Float32Array(driftCount);
+    const driftRad = new Float32Array(driftCount);
+    const driftSpeedU = new Float32Array(driftCount);
+    const driftSpeedV = new Float32Array(driftCount);
 
-    // 8. Animation & Render Loop
+    for (let i = 0; i < driftCount; i++) {
+      driftU[i] = Math.random() * Math.PI * 2;
+      driftV[i] = Math.random() * Math.PI * 2;
+      driftRad[i] = r * (0.8 + Math.random() * 0.4);
+      driftSpeedU[i] = 0.004 + Math.random() * 0.008;
+      driftSpeedV[i] = 0.006 + Math.random() * 0.014;
+
+      const px = (R + driftRad[i] * Math.cos(driftV[i])) * Math.cos(driftU[i]);
+      const py = (R + driftRad[i] * Math.cos(driftV[i])) * Math.sin(driftU[i]);
+      const pz = driftRad[i] * Math.sin(driftV[i]);
+
+      driftPositions[i * 3] = px;
+      driftPositions[i * 3 + 1] = py;
+      driftPositions[i * 3 + 2] = pz;
+
+      driftColors[i * 3] = 0.21;
+      driftColors[i * 3 + 1] = 0.88;
+      driftColors[i * 3 + 2] = 1.0;
+    }
+
+    const driftGeometry = new THREE.BufferGeometry();
+    driftGeometry.setAttribute("position", new THREE.BufferAttribute(driftPositions, 3));
+    driftGeometry.setAttribute("color", new THREE.BufferAttribute(driftColors, 3));
+
+    const driftMaterial = new THREE.PointsMaterial({
+      size: 0.09,
+      map: pTexture,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.7,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const torusPoints = new THREE.Points(driftGeometry, driftMaterial);
+    torusMesh.add(torusPoints);
+    torusPointsRef.current = torusPoints;
+    driftDataRef.current = { u: driftU, v: driftV, r: driftRad, speedU: driftSpeedU, speedV: driftSpeedV };
+
+    // 3D Vector Pin Anchor Position for the Question Callout Badge
+    const pinWorldPos = new THREE.Vector3(0.0, R + r + 0.25, 0.0);
+    const screenCoord = new THREE.Vector3();
+
+    // 7. Render & Acoustic Animation Loop
     let animationFrameId: number;
-    const tempVec = new THREE.Vector3();
+    let clockTime = 0;
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
 
-      // System load modulates auto-rotation speed
-      const load = loadRef.current;
-      const speedMult = 0.5 + (load / 100) * 1.5;
-      controls.autoRotateSpeed = 0.6 * speedMult;
-      controls.update();
+      // Sample Live Web Audio Signal
+      const audioSignal = globalAudioEngine.sampleSignal();
+      const rawLevel = Math.max(audioSignal.rms, audioSignal.amplitude * 0.5);
 
-      // Dynamic Torus subtle breathing & wobble
-      const time = performance.now() * 0.001;
-      torusWire.rotation.z += 0.0015 * speedMult;
-      torusWire.rotation.y = Math.sin(time * 0.4) * 0.12;
+      clockTime += 0.016;
 
-      // Pulse decay from token bursts
-      if (pulseRef.current > 0.01) {
-        pulseRef.current *= 0.92;
-        torusWire.scale.setScalar(1.0 + pulseRef.current * 0.05);
+      // Smooth attack/decay for speech envelopes
+      const targetCadence = isOratorSpeaking ? 1.0 : 0.0;
+      speechCadenceRef.current += (targetCadence - speechCadenceRef.current) * (isOratorSpeaking ? 0.25 : 0.08);
+
+      const targetUserSpeaking = isUserSpeaking ? 1.0 : 0.0;
+      userSpeakingRef.current += (targetUserSpeaking - userSpeakingRef.current) * (isUserSpeaking ? 0.35 : 0.1);
+
+      const targetComplete = isInquestComplete ? 1.0 : 0.0;
+      completeStateRef.current += (targetComplete - completeStateRef.current) * 0.04;
+
+      // Shockwave decay
+      if (shockwaveRef.current > 0.01) {
+        shockwaveRef.current *= 0.91;
       } else {
-        torusWire.scale.setScalar(1.0);
+        shockwaveRef.current = 0.0;
       }
 
-      // Update particles streaming across torus surface
-      if (particleDataRef.current && particlePointsRef.current) {
-        const pPositions = particlePointsRef.current.geometry.attributes.position.array as Float32Array;
-        const pColors = particlePointsRef.current.geometry.attributes.color.array as Float32Array;
-        const { u, v, r: rads, speedU, speedV } = particleDataRef.current;
-        const consensus = consensusRef.current;
-        const curPhase = phaseRef.current;
+      // Update shader uniforms
+      uniforms.uTime.value = clockTime;
+      uniforms.uAudioLevel.value = rawLevel;
+      uniforms.uSpeechCadence.value = speechCadenceRef.current;
+      uniforms.uUserSpeaking.value = userSpeakingRef.current;
+      uniforms.uPulseShockwave.value = shockwaveRef.current;
+      uniforms.uCompleteState.value = completeStateRef.current;
 
-        // Base target color based on consensus / phase
-        const targetColor = new THREE.Color();
-        if (consensus > 0.9) {
-          targetColor.setHex(0x10b981); // Emerald consensus
-        } else if (curPhase === "retry") {
-          targetColor.setHex(0xf59e0b); // Warning amber
-        } else if (curPhase === "eval") {
-          targetColor.setHex(0xa855f7); // Deliberation purple
-        } else {
-          targetColor.setHex(0x35e0ff); // Radiant cyan
+      // Subtle dynamic acoustic rotation (not monotonous static spin)
+      const rotationSpeed = 0.0012 + speechCadenceRef.current * 0.004 + userSpeakingRef.current * 0.006;
+      torusMesh.rotation.z += rotationSpeed;
+      torusMesh.rotation.y = Math.sin(clockTime * 0.8) * 0.12;
+
+      // Acoustic Particle Morphing (Layer 1: Normal Radiation)
+      if (normalDataRef.current && normalPointsRef.current) {
+        const nPos = normalPointsRef.current.geometry.attributes.position.array as Float32Array;
+        const { u, v, dist, speedDist } = normalDataRef.current;
+        const particleSpeedMult = 1.0 + speechCadenceRef.current * 2.8 + rawLevel * 3.0;
+
+        for (let i = 0; i < normalCount; i++) {
+          dist[i] += speedDist[i] * particleSpeedMult;
+          if (dist[i] > 1.3) {
+            dist[i] = 0.02;
+            u[i] = Math.random() * Math.PI * 2;
+            v[i] = Math.random() * Math.PI * 2;
+          }
+
+          const curR = r + dist[i];
+          nPos[i * 3] = (R + curR * Math.cos(v[i])) * Math.cos(u[i]);
+          nPos[i * 3 + 1] = (R + curR * Math.cos(v[i])) * Math.sin(u[i]);
+          nPos[i * 3 + 2] = curR * Math.sin(v[i]);
         }
-
-        const effectiveSpeed = (1 + load / 80) * (1 + pulseRef.current * 2);
-
-        for (let i = 0; i < particleCount; i++) {
-          u[i] = (u[i] + speedU[i] * effectiveSpeed) % (Math.PI * 2);
-          v[i] = (v[i] + speedV[i] * effectiveSpeed) % (Math.PI * 2);
-
-          const curR = rads[i] + Math.sin(u[i] * 3 + time) * 0.04;
-          const px = (R + curR * Math.cos(v[i])) * Math.cos(u[i]);
-          const py = (R + curR * Math.cos(v[i])) * Math.sin(u[i]);
-          const pz = curR * Math.sin(v[i]);
-
-          pPositions[i * 3] = px;
-          pPositions[i * 3 + 1] = py;
-          pPositions[i * 3 + 2] = pz;
-
-          // Color blending towards target color
-          pColors[i * 3] = THREE.MathUtils.lerp(pColors[i * 3], targetColor.r, 0.03);
-          pColors[i * 3 + 1] = THREE.MathUtils.lerp(pColors[i * 3 + 1], targetColor.g, 0.03);
-          pColors[i * 3 + 2] = THREE.MathUtils.lerp(pColors[i * 3 + 2], targetColor.b, 0.03);
-        }
-
-        particlePointsRef.current.geometry.attributes.position.needsUpdate = true;
-        particlePointsRef.current.geometry.attributes.color.needsUpdate = true;
+        normalPointsRef.current.geometry.attributes.position.needsUpdate = true;
       }
 
-      // Project 3D reasoning steps to 2D screen space for annotations
-      const activeSteps = stepsRef.current.slice(0, 4);
-      const projected: ProjectedAnnotation[] = [];
+      // 3D Vector Pin Projection: Convert 3D world coordinate to 2D Screen Space
+      pinWorldPos.set(0.0, R + r + 0.25 + Math.sin(clockTime * 1.5) * 0.05, 0.0);
+      pinWorldPos.applyMatrix4(torusMesh.matrixWorld);
 
-      activeSteps.forEach((step) => {
-        if (!step.worldCoord) return;
-        tempVec.set(step.worldCoord[0], step.worldCoord[1], step.worldCoord[2]);
+      screenCoord.copy(pinWorldPos);
+      screenCoord.project(camera);
 
-        // Transform into torus local coordinate space
-        tempVec.applyMatrix4(torusWire.matrixWorld);
-        tempVec.project(camera);
+      // Check if coordinate is in front of camera
+      const isVisible = screenCoord.z < 1.0;
+      const screenX = ((screenCoord.x + 1) * width) / 2;
+      const screenY = ((-screenCoord.y + 1) * height) / 2;
 
-        const isVisible = tempVec.z < 1.0;
-        const screenX = ((tempVec.x + 1) * 0.5) * width;
-        const screenY = ((-tempVec.y + 1) * 0.5) * height;
+      // Determine active callout color scheme
+      const colorScheme = isInquestComplete
+        ? "emerald"
+        : isOratorSpeaking
+        ? "amber"
+        : isUserSpeaking
+        ? "magenta"
+        : "cyan";
 
-        if (isVisible && screenX > 20 && screenX < width - 20 && screenY > 20 && screenY < height - 20) {
-          projected.push({
-            id: step.id,
-            step,
-            screenX,
-            screenY,
-            visible: true,
-          });
-        }
+      setProjectedPin({
+        label: `INQUEST ${String(currentQuestionIndex).padStart(2, "0")}/${totalQuestions}`,
+        sub: currentQuestionPrompt,
+        tag: isInquestComplete
+          ? "REQUIREMENTS CONVERGED"
+          : isOratorSpeaking
+          ? "ORATOR SPEAKING"
+          : isUserSpeaking
+          ? "USER SPEAKING"
+          : "ACTIVE INQUEST",
+        screenX,
+        screenY,
+        visible: isVisible,
+        colorScheme,
       });
 
-      setAnnotations(projected);
+      controls.update();
       renderer.render(scene, camera);
     };
 
     animate();
 
-    // 9. Resize Handling
+    // Resize Handler
     const handleResize = () => {
       if (!container) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
+      const newW = container.clientWidth || 800;
+      const newH = container.clientHeight || 500;
+      camera.aspect = newW / newH;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      renderer.setSize(newW, newH);
     };
 
     const resizeObserver = new ResizeObserver(handleResize);
@@ -386,138 +576,144 @@ export default function CortexTorus3D({
     return () => {
       cancelAnimationFrame(animationFrameId);
       resizeObserver.disconnect();
-      renderer.dispose();
       torusGeo.dispose();
-      wireMat.dispose();
-      solidMat.dispose();
+      morphMaterial.dispose();
       ringGeo.dispose();
       ringMat.dispose();
-      particleGeometry.dispose();
-      particleMaterial.dispose();
+      ringAmberGeo.dispose();
+      ringAmberMat.dispose();
+      normalGeometry.dispose();
+      normalMaterial.dispose();
+      driftGeometry.dispose();
+      driftMaterial.dispose();
       pTexture.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
     };
-  }, []);
-
-  // Update wireframe mode
-  useEffect(() => {
-    if (torusWireRef.current) {
-      const mat = torusWireRef.current.material as THREE.MeshStandardMaterial;
-      mat.wireframe = wireframeMode;
-    }
-  }, [wireframeMode]);
+  }, [
+    isOratorSpeaking,
+    isUserSpeaking,
+    currentQuestionPrompt,
+    currentQuestionIndex,
+    totalQuestions,
+    isInquestComplete,
+  ]);
 
   const resetCamera = () => {
     if (cameraRef.current && controlsRef.current) {
-      cameraRef.current.position.set(0, 4.2, 7.8);
+      cameraRef.current.position.set(0, 3.8, 8.2);
       controlsRef.current.target.set(0, 0, 0);
       controlsRef.current.update();
     }
   };
 
   return (
-    <div className="relative h-full w-full select-none overflow-hidden rounded-2xl border border-seam/80 bg-abyss/90">
-      {/* Three.js canvas container */}
+    <div
+      className={`relative h-full w-full select-none overflow-hidden ${
+        hideBorders
+          ? "bg-transparent"
+          : "rounded-2xl border border-seam/90 bg-abyss/90 shadow-2xl"
+      }`}
+    >
+      {/* 3D WebGL Canvas Viewport */}
       <div ref={containerRef} className="absolute inset-0 cursor-grab active:cursor-grabbing" />
 
-      {/* Floating 3D Tracked Annotations */}
-      {annotations.map((ann) => {
-        const isLoop = ann.step.loopBack;
-        const badgeBorder = isLoop
-          ? "border-forge-alert bg-forge-alert/10 text-forge-alert"
-          : ann.step.confidence > 0.9
-          ? "border-emerald-400 bg-emerald-950/40 text-emerald-300"
-          : "border-forge-cyan bg-cyan-950/40 text-forge-cyan";
-
-        return (
-          <div
-            key={ann.id}
-            style={{
-              left: `${ann.screenX}px`,
-              top: `${ann.screenY}px`,
-              transform: "translate(-50%, -100%)",
-            }}
-            onClick={() => onSelectStep?.(ann.step)}
-            className="pointer-events-auto absolute z-20 transition-transform duration-75 hover:scale-105"
-          >
-            {/* Coordinate pin anchor */}
-            <div className="flex flex-col items-center">
-              <div
-                className={`flex max-w-[210px] cursor-pointer flex-col gap-1 rounded-lg border px-2.5 py-1.5 backdrop-blur-md shadow-lg ${badgeBorder}`}
-              >
-                <div className="flex items-center justify-between gap-2 text-[9px] font-mono-hud font-bold tracking-wider uppercase">
-                  <span>{ann.step.phase}</span>
-                  <span className="opacity-80">{(ann.step.confidence * 100).toFixed(0)}% CONF</span>
-                </div>
-                <div className="line-clamp-1 text-[11px] font-semibold text-pearl">
-                  {ann.step.title}
-                </div>
-                <div className="line-clamp-1 text-[9px] font-mono-hud text-forge-dim">
-                  {ann.step.detail}
-                </div>
+      {/* Glowing 3D Vector Pin Anchored Directly to the Torus Surface */}
+      {projectedPin && projectedPin.visible && (
+        <div
+          style={{
+            left: `${projectedPin.screenX}px`,
+            top: `${projectedPin.screenY}px`,
+            transform: "translate(-50%, -100%)",
+          }}
+          className="pointer-events-none absolute z-30 transition-transform duration-75"
+        >
+          <div className="flex flex-col items-center">
+            {/* Callout Card */}
+            <div
+              className={`flex max-w-[280px] sm:max-w-[340px] flex-col gap-1 rounded-xl border p-2.5 backdrop-blur-2xl shadow-2xl transition-all duration-300 ${
+                projectedPin.colorScheme === "amber"
+                  ? "border-amber-400 bg-amber-950/90 text-amber-300 shadow-[0_0_24px_rgba(245,158,11,0.5)] ring-1 ring-amber-400/50"
+                  : projectedPin.colorScheme === "magenta"
+                  ? "border-pink-500 bg-pink-950/90 text-pink-300 shadow-[0_0_24px_rgba(236,72,153,0.5)] ring-1 ring-pink-400/50"
+                  : projectedPin.colorScheme === "emerald"
+                  ? "border-emerald-400 bg-emerald-950/90 text-emerald-300 shadow-[0_0_24px_rgba(16,185,129,0.5)] ring-1 ring-emerald-400/50"
+                  : "border-cyan-400 bg-cyan-950/90 text-cyan-300 shadow-[0_0_20px_rgba(53,224,255,0.45)]"
+              }`}
+            >
+              <div className="flex items-center justify-between text-[8px] font-mono-hud font-bold tracking-wider uppercase">
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      isOratorSpeaking ? "bg-amber-400 animate-ping" : "bg-cyan-400"
+                    }`}
+                  />
+                  {projectedPin.tag}
+                </span>
+                <span className="text-[7.5px] opacity-75">ORATOR INQUEST</span>
               </div>
 
-              {/* Pulsing beacon needle */}
-              <div className="flex flex-col items-center">
-                <div className={`h-4 w-px ${isLoop ? "bg-forge-alert" : "bg-forge-cyan"}`} />
-                <div
-                  className={`h-2 w-2 rounded-full border border-pearl ${
-                    isLoop ? "bg-forge-alert animate-ping" : "bg-forge-cyan animate-pulse"
-                  }`}
-                />
+              <div className="font-extrabold text-[11px] text-pearl tracking-wide">
+                [ {projectedPin.label} ]
+              </div>
+
+              <div className="text-[10px] font-mono leading-tight text-white/95 line-clamp-2">
+                "{projectedPin.sub}"
               </div>
             </div>
+
+            {/* Glowing Anchored Needle */}
+            <div className="flex flex-col items-center">
+              <div
+                className={`h-5 w-0.5 ${
+                  projectedPin.colorScheme === "amber"
+                    ? "bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,1)]"
+                    : projectedPin.colorScheme === "emerald"
+                    ? "bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,1)]"
+                    : "bg-cyan-400 shadow-[0_0_8px_rgba(53,224,255,1)]"
+                }`}
+              />
+              <div
+                className={`h-2.5 w-2.5 rounded-full border border-pearl animate-pulse ${
+                  projectedPin.colorScheme === "amber"
+                    ? "bg-amber-400 shadow-[0_0_10px_rgba(245,158,11,1)]"
+                    : projectedPin.colorScheme === "emerald"
+                    ? "bg-emerald-400 shadow-[0_0_10px_rgba(16,185,129,1)]"
+                    : "bg-cyan-400 shadow-[0_0_10px_rgba(53,224,255,1)]"
+                }`}
+              />
+            </div>
           </div>
-        );
-      })}
-
-      {/* 3D Viewport HUD Overlay Controls */}
-      <div className="pointer-events-none absolute inset-x-3 top-3 flex items-center justify-between">
-        <div className="flex items-center gap-2 rounded-lg border border-seam/80 bg-abyss/80 px-2.5 py-1 font-mono-hud text-[10px] tracking-wider text-forge-cyan backdrop-blur-md">
-          <span className="inline-block h-2 w-2 animate-ping rounded-full bg-forge-cyan" />
-          <span>REASONING MANIFOLD // TORUS STATE MACHINE</span>
         </div>
+      )}
 
-        <div className="pointer-events-auto flex items-center gap-1.5">
-          <button
-            onClick={() => setWireframeMode((v) => !v)}
-            className={`rounded border px-2 py-1 font-mono-hud text-[10px] transition-colors ${
-              wireframeMode
-                ? "border-forge-cyan/60 bg-forge-cyan/10 text-forge-cyan"
-                : "border-seam bg-depth text-forge-dim hover:text-pearl"
-            }`}
-            title="Toggle Wireframe Lattice"
-          >
-            LATTICE
-          </button>
-          <button
-            onClick={resetCamera}
-            className="rounded border border-seam bg-depth px-2 py-1 font-mono-hud text-[10px] text-forge-dim transition-colors hover:border-forge-cyan/50 hover:text-pearl"
-            title="Reset 3D Camera"
-          >
-            RESET CAM
-          </button>
-        </div>
-      </div>
+      {/* Only render diagnostic badges when cleanMode is false */}
+      {!cleanMode && (
+        <>
+          <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-lg border border-seam/80 bg-abyss/85 px-3 py-1.5 font-mono-hud text-[10px] tracking-wider text-forge-cyan backdrop-blur-md">
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${
+                isOratorSpeaking
+                  ? "bg-amber-400 animate-ping"
+                  : isInquestComplete
+                  ? "bg-emerald-400 animate-pulse"
+                  : "bg-cyan-400 animate-ping"
+              }`}
+            />
+            <span className="font-bold">THE ORATOR</span>
+          </div>
 
-      {/* 3D Orbit Help Hint */}
-      <div className="pointer-events-none absolute bottom-3 left-3 rounded border border-seam/60 bg-abyss/70 px-2 py-1 font-mono-hud text-[9px] tracking-wider text-forge-dim/80 backdrop-blur-sm">
-        DRAG TO ROTATE · SCROLL TO ZOOM · SHIFT+DRAG TO PAN
-      </div>
-
-      {/* Active Phase & Consensus Watermark */}
-      <div className="pointer-events-none absolute bottom-3 right-3 text-right font-mono-hud">
-        <div className="text-[10px] tracking-widest text-forge-dim">MANIFOLD STATE</div>
-        <div
-          className={`text-xs font-bold uppercase tracking-wider ${
-            consensusScore > 0.9 ? "text-emerald-400" : phase === "retry" ? "text-amber-400" : "text-forge-cyan"
-          }`}
-        >
-          {phase} · {consensusScore > 0.9 ? "CONSENSUS CONVERGED" : "EVALUATING INVARIANTS"}
-        </div>
-      </div>
+          <div className="pointer-events-auto absolute right-3 top-3 flex items-center gap-1.5">
+            <button
+              onClick={resetCamera}
+              className="rounded-lg border border-seam bg-depth px-2.5 py-1 font-mono-hud text-[9.5px] text-forge-dim transition-colors hover:border-forge-cyan/50 hover:text-pearl"
+            >
+              RESET CAM
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

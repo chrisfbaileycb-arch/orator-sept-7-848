@@ -1,6 +1,18 @@
 /** ---------- Shared domain types for the ORATOR.AI forge ---------- */
 
-export type ModelProvider = "openai" | "gemini" | "openrouter" | "cheaper-inference" | "huggingface" | "omniroute" | "local" | "deterministic";
+export type ModelProvider =
+  | "gemini"
+  | "aws-bedrock"
+  | "anthropic"
+  | "microsoft-azure"
+  | "xai-grok"
+  | "openai"
+  | "openrouter"
+  | "cheaper-inference"
+  | "huggingface"
+  | "omniroute"
+  | "local"
+  | "deterministic";
 
 export interface ModelExpert {
   id: string;

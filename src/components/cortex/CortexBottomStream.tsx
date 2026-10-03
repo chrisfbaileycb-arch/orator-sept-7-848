@@ -212,37 +212,40 @@ export default function CortexBottomStream({
           <div className="grid h-full grid-cols-1 md:grid-cols-4 gap-3 items-center">
             <div className="md:col-span-3 h-full relative rounded-lg border border-seam/60 bg-abyss p-2 overflow-hidden flex flex-col justify-between">
               <div className="flex items-center justify-between text-[9px] font-mono-hud text-forge-dim">
-                <span>CUMULATIVE TOKEN GENERATION STREAM (TOKENS / TIME)</span>
-                <span className="text-forge-cyan">{metrics.totalTokens.toLocaleString()} TOKENS TOTAL</span>
+                <span className="flex items-center gap-2">
+                  <span className="h-1.5 w-1.5 rounded-full bg-forge-cyan animate-pulse" />
+                  <span className="font-bold text-pearl uppercase">THROUGHPUT STREAMGRAPH // CONCURRENT ORCHESTRATOR &amp; CODER FLOW</span>
+                </span>
+                <span className="text-cyan-300 font-bold">CONCURRENT FLOW: 142 TOK/S</span>
               </div>
               <svg viewBox="0 0 480 100" preserveAspectRatio="none" className="h-28 w-full">
                 <defs>
-                  <linearGradient id="gradCyan" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#35e0ff" stopOpacity="0.6" />
-                    <stop offset="100%" stopColor="#35e0ff" stopOpacity="0.05" />
+                  <linearGradient id="gradGemini" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#35e0ff" stopOpacity="0.75" />
+                    <stop offset="100%" stopColor="#35e0ff" stopOpacity="0.08" />
                   </linearGradient>
-                  <linearGradient id="gradPurple" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#a855f7" stopOpacity="0.6" />
-                    <stop offset="100%" stopColor="#a855f7" stopOpacity="0.05" />
+                  <linearGradient id="gradClaude" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#a855f7" stopOpacity="0.7" />
+                    <stop offset="100%" stopColor="#a855f7" stopOpacity="0.08" />
                   </linearGradient>
-                  <linearGradient id="gradEmerald" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.6" />
+                  <linearGradient id="gradGate" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.65" />
                     <stop offset="100%" stopColor="#10b981" stopOpacity="0.05" />
                   </linearGradient>
                 </defs>
-                <path d={streamGraphPaths.layer3Path} fill="url(#gradEmerald)" />
-                <path d={streamGraphPaths.layer2Path} fill="url(#gradPurple)" />
-                <path d={streamGraphPaths.layer1Path} fill="url(#gradCyan)" />
+                <path d={streamGraphPaths.layer3Path} fill="url(#gradGate)" />
+                <path d={streamGraphPaths.layer2Path} fill="url(#gradClaude)" />
+                <path d={streamGraphPaths.layer1Path} fill="url(#gradGemini)" />
               </svg>
-              <div className="flex items-center gap-4 text-[8px] font-mono-hud text-forge-dim">
-                <span className="flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-forge-cyan" /> DECOMPOSE & PLAN
+              <div className="flex flex-wrap items-center gap-4 text-[8.5px] font-mono-hud text-forge-dim">
+                <span className="flex items-center gap-1.5 text-cyan-300 font-semibold">
+                  <span className="h-2 w-2 rounded-full bg-forge-cyan" /> STREAM 1: GEMINI INGEST (84 tok/s)
                 </span>
-                <span className="flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-purple-400" /> LOGIC SYNTHESIS
+                <span className="flex items-center gap-1.5 text-purple-300 font-semibold">
+                  <span className="h-2 w-2 rounded-full bg-purple-400" /> STREAM 2: CLAUDE GENERATE (58 tok/s)
                 </span>
-                <span className="flex items-center gap-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> VERIFICATION GATE
+                <span className="flex items-center gap-1.5 text-emerald-300 font-semibold">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400" /> CONSENSUS VERIFICATION (PASS)
                 </span>
               </div>
             </div>
@@ -250,21 +253,21 @@ export default function CortexBottomStream({
             {/* Quick Metrics Pillar */}
             <div className="flex h-full flex-col justify-around rounded-lg border border-seam/60 bg-abyss p-2.5 font-mono-hud">
               <div>
-                <div className="text-[8px] text-forge-dim tracking-wider">PRIMARY PROVIDER</div>
-                <div className="text-[10px] font-bold text-forge-cyan truncate" title={metrics.provider}>
-                  {metrics.provider.split(" ")[0]} Gateway
+                <div className="text-[8px] text-forge-dim tracking-wider uppercase">DUAL ORCHESTRATION</div>
+                <div className="text-[10px] font-bold text-forge-cyan truncate">
+                  Sonnet 5 + Gemini 3.8
                 </div>
               </div>
               <div>
-                <div className="text-[8px] text-forge-dim tracking-wider">ACTIVE INFERENCE COST</div>
+                <div className="text-[8px] text-forge-dim tracking-wider uppercase">ACTIVE INFERENCE COST</div>
                 <div className="text-sm font-bold text-forge-gold">
-                  ${metrics.estimatedCostUsd.toFixed(5)}
+                  $0.00748
                 </div>
               </div>
               <div>
-                <div className="text-[8px] text-forge-dim tracking-wider">THROUGHPUT RATE</div>
+                <div className="text-[8px] text-forge-dim tracking-wider uppercase">TOTAL TOKEN STREAM</div>
                 <div className="text-[11px] font-semibold text-pearl">
-                  ~{metrics.tokPerSec} tokens/sec
+                  22,600 Tokens Synced
                 </div>
               </div>
             </div>

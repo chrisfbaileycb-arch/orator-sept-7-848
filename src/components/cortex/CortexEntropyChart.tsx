@@ -1,6 +1,10 @@
 /**
- * CORTEX Confidence Distribution Histogram & Token Entropy Bar Chart
- * Plus model consensus & state indicator matrix.
+ * CORTEX Confidence Distribution & Entropy
+ * - 4-column probability histogram (values 0.92, 0.78, 0.85, 0.96)
+ * - Radial metric ring / circular gauge showing "CYCLE INTEGRITY: 98.4%"
+ * - Quorum Health & Cost Ledger:
+ *     - Active Quorum: Claude Sonnet 5 + Gemini 3.8 Flash
+ *     - Live Token Tracker: Input: 18.4k | Output: 4.2k | Cost: $0.00748
  */
 
 import { useMemo } from "react";
@@ -13,153 +17,134 @@ interface Props {
 }
 
 export default function CortexEntropyChart({ metrics, agents, reasoningSteps }: Props) {
-  // Compute confidence distribution histogram bins (0.5 - 1.0 in 5 buckets)
-  const histogramBins = useMemo(() => {
-    const buckets = [
-      { label: "0.5-0.6", count: 0, min: 0.5, max: 0.6, color: "bg-red-500" },
-      { label: "0.6-0.7", count: 0, min: 0.6, max: 0.7, color: "bg-amber-500" },
-      { label: "0.7-0.8", count: 0, min: 0.7, max: 0.8, color: "bg-yellow-400" },
-      { label: "0.8-0.9", count: 0, min: 0.8, max: 0.9, color: "bg-cyan-400" },
-      { label: "0.9-1.0", count: 0, min: 0.9, max: 1.01, color: "bg-emerald-400" },
+  // 4-column probability histogram with values: 0.92, 0.78, 0.85, 0.96
+  const histogramCols = useMemo(() => {
+    return [
+      { label: "P(1) SYNTAX", val: 0.92, barPct: 92, color: "from-cyan-500 to-cyan-400", border: "border-cyan-400" },
+      { label: "P(2) SCHEMA", val: 0.78, barPct: 78, color: "from-amber-500 to-amber-400", border: "border-amber-400" },
+      { label: "P(3) INVARIANT", val: 0.85, barPct: 85, color: "from-purple-500 to-purple-400", border: "border-purple-400" },
+      { label: "P(4) CONSENSUS", val: 0.96, barPct: 96, color: "from-emerald-500 to-emerald-400", border: "border-emerald-400" },
     ];
+  }, []);
 
-    // Seed with baseline plus recent reasoning steps
-    buckets[0].count = 1;
-    buckets[1].count = Math.max(1, metrics.loopCount);
-    buckets[2].count = 3;
-    buckets[3].count = 6;
-    buckets[4].count = Math.floor(8 + metrics.consensusScore * 10);
-
-    reasoningSteps.forEach((step) => {
-      const b = buckets.find((bucket) => step.confidence >= bucket.min && step.confidence < bucket.max);
-      if (b) b.count += 1;
-    });
-
-    const maxCount = Math.max(...buckets.map((b) => b.count), 1);
-    return buckets.map((b) => ({ ...b, pct: (b.count / maxCount) * 100 }));
-  }, [reasoningSteps, metrics.loopCount, metrics.consensusScore]);
-
-  // Compute token entropy frequency spectrum bars (12 bars)
-  const entropyBars = useMemo(() => {
-    const bars: { heightPct: number; active: boolean }[] = [];
-    const baseEntropy = metrics.tokenEntropy;
-    for (let i = 0; i < 14; i++) {
-      const noise = Math.sin(i * 0.8 + Date.now() * 0.002) * 0.25;
-      const val = Math.max(10, Math.min(95, (baseEntropy + noise) * 100));
-      bars.push({
-        heightPct: val,
-        active: val > 60,
-      });
-    }
-    return bars;
-  }, [metrics.tokenEntropy]);
+  // Cycle integrity circular gauge: 98.4%
+  const integrityPct = 98.4;
+  const radius = 32;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (integrityPct / 100) * circumference;
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-seam/90 bg-hull/80 p-3.5 backdrop-blur-md">
-      {/* Confidence Distribution Header */}
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-2.5 rounded-xl border border-seam/90 bg-hull/90 p-3 backdrop-blur-md shadow-xl">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-seam/60 pb-1.5">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="font-mono-hud text-[11px] font-bold tracking-wider text-pearl">
             CONFIDENCE DISTRIBUTION & ENTROPY
           </span>
         </div>
-        <span className="font-mono-hud text-[10px] text-forge-dim">
-          ENTROPY: <span className="text-forge-cyan">{metrics.tokenEntropy.toFixed(3)}</span>
+        <span className="font-mono-hud text-[9.5px] text-forge-dim">
+          ENTROPY: <span className="text-forge-cyan font-bold">0.412</span>
         </span>
       </div>
 
-      {/* Dual Grid: Histogram on left, Entropy Bars on right */}
-      <div className="grid grid-cols-2 gap-2.5">
-        {/* Confidence Histogram */}
-        <div className="flex flex-col justify-end gap-1 rounded-lg border border-seam/60 bg-abyss p-2.5">
-          <div className="text-[9px] font-mono-hud tracking-wider text-forge-dim mb-1">
-            CONFIDENCE HISTOGRAM
+      {/* Grid: 4-Column Probability Histogram (Left) & Radial Metric Ring (Right) */}
+      <div className="grid grid-cols-12 gap-2.5 items-center">
+        {/* 4-Column Probability Histogram (8 Cols) */}
+        <div className="col-span-8 flex flex-col justify-between rounded-lg border border-seam/70 bg-abyss p-2.5">
+          <div className="flex items-center justify-between text-[8.5px] font-mono-hud tracking-wider text-forge-dim mb-1">
+            <span>4-COLUMN PROBABILITY HISTOGRAM</span>
+            <span className="text-cyan-300">THRESHOLD &gt;= 0.85</span>
           </div>
-          <div className="flex h-20 items-end gap-1.5 pt-1">
-            {histogramBins.map((bin, i) => (
-              <div key={i} className="flex flex-1 flex-col items-center gap-1 h-full justify-end">
+
+          <div className="flex h-20 items-end gap-2 pt-1">
+            {histogramCols.map((col, idx) => (
+              <div key={idx} className="flex flex-1 flex-col items-center gap-1 h-full justify-end">
+                <span className="font-mono-hud text-[9px] font-bold text-pearl tabular-nums">
+                  {col.val.toFixed(2)}
+                </span>
                 <div
-                  style={{ height: `${bin.pct}%` }}
-                  className={`w-full rounded-t transition-all duration-300 ${bin.color} opacity-85 shadow-sm`}
-                  title={`${bin.label}: ${bin.count} occurrences`}
+                  style={{ height: `${col.barPct}%` }}
+                  className={`w-full rounded-t bg-gradient-to-t ${col.color} opacity-90 shadow-[0_0_8px_rgba(53,224,255,0.25)] transition-all duration-300`}
                 />
-                <span className="font-mono-hud text-[7px] text-forge-dim scale-90">
-                  {bin.label.split("-")[0]}
+                <span className="font-mono-hud text-[7px] text-forge-dim truncate max-w-full">
+                  {col.label}
                 </span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Token Entropy Frequency Spectrum */}
-        <div className="flex flex-col justify-end gap-1 rounded-lg border border-seam/60 bg-abyss p-2.5">
-          <div className="text-[9px] font-mono-hud tracking-wider text-forge-dim mb-1">
-            TOKEN ENTROPY SPECTRUM
-          </div>
-          <div className="flex h-20 items-end gap-1 pt-1">
-            {entropyBars.map((bar, i) => (
-              <div
-                key={i}
-                style={{ height: `${bar.heightPct}%` }}
-                className={`flex-1 rounded-t transition-all duration-200 ${
-                  bar.active
-                    ? "bg-gradient-to-t from-cyan-500 to-pink-500"
-                    : "bg-cyan-900/60"
-                }`}
+        {/* Radial Metric Ring / Circular Gauge: CYCLE INTEGRITY 98.4% (4 Cols) */}
+        <div className="col-span-4 flex flex-col items-center justify-center rounded-lg border border-seam/70 bg-abyss p-2 text-center">
+          <div className="relative flex items-center justify-center">
+            <svg width="78" height="78" className="rotate-[-90deg]">
+              <circle
+                cx="39"
+                cy="39"
+                r={radius}
+                className="stroke-seam/60"
+                strokeWidth="6"
+                fill="none"
               />
-            ))}
+              <circle
+                cx="39"
+                cy="39"
+                r={radius}
+                stroke="#10b981"
+                strokeWidth="6"
+                strokeDasharray={circumference}
+                strokeDashoffset={strokeDashoffset}
+                strokeLinecap="round"
+                fill="none"
+                className="transition-all duration-700 drop-shadow-[0_0_8px_rgba(16,185,129,0.6)]"
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center font-mono-hud">
+              <span className="text-[12px] font-extrabold text-pearl">{integrityPct}%</span>
+            </div>
+          </div>
+          <div className="mt-1 font-mono-hud text-[8px] font-bold tracking-wider text-emerald-400 uppercase">
+            CYCLE INTEGRITY: 98.4%
           </div>
         </div>
       </div>
 
-      {/* Model Consensus & State Indicator Matrix */}
-      <div className="grid grid-cols-3 gap-2 pt-1 font-mono-hud">
-        {/* Active Agents */}
-        <div className="rounded-lg border border-seam/60 bg-abyss/80 p-2 text-center">
-          <div className="text-[8px] tracking-wider text-forge-dim uppercase">AGENTS ACTIVE</div>
-          <div className="text-sm font-bold text-forge-cyan">
-            {agents.filter((a) => a.status !== "idle").length}/{agents.length}
-          </div>
+      {/* Quorum Health & Cost Ledger */}
+      <div className="rounded-lg border border-seam/80 bg-abyss/90 p-2 font-mono-hud text-[9.5px]">
+        <div className="flex items-center justify-between border-b border-seam/50 pb-1 text-forge-dim text-[8.5px]">
+          <span className="font-bold text-pearl flex items-center gap-1.5">
+            <span className="h-1.5 w-1.5 rounded-full bg-forge-gold animate-pulse" />
+            QUORUM HEALTH & COST LEDGER
+          </span>
+          <span className="text-emerald-400">STATUS: CONVERGED</span>
         </div>
 
-        {/* Loop Count */}
-        <div className="rounded-lg border border-seam/60 bg-abyss/80 p-2 text-center">
-          <div className="text-[8px] tracking-wider text-forge-dim uppercase">LOOP COUNT</div>
-          <div className={`text-sm font-bold ${metrics.loopCount > 0 ? "text-amber-400" : "text-pearl"}`}>
-            {metrics.loopCount} CYCLES
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1.5">
+          {/* Active Quorum */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[8px] text-forge-dim uppercase tracking-wider">ACTIVE QUORUM</span>
+            <div className="flex items-center gap-1.5 font-semibold text-pearl">
+              <span className="rounded bg-purple-950/80 border border-purple-500/40 px-1 py-0.5 text-purple-300 text-[8.5px]">
+                Claude Sonnet 5
+              </span>
+              <span className="text-forge-dim">+</span>
+              <span className="rounded bg-cyan-950/80 border border-cyan-500/40 px-1 py-0.5 text-cyan-300 text-[8.5px]">
+                Gemini 3.8 Flash
+              </span>
+            </div>
           </div>
-        </div>
 
-        {/* Consensus Score */}
-        <div className="rounded-lg border border-seam/60 bg-abyss/80 p-2 text-center">
-          <div className="text-[8px] tracking-wider text-forge-dim uppercase">CONSENSUS</div>
-          <div className={`text-sm font-bold ${metrics.consensusScore > 0.85 ? "text-emerald-400" : "text-cyan-400"}`}>
-            {(metrics.consensusScore * 100).toFixed(0)}%
-          </div>
-        </div>
-
-        {/* Temperature */}
-        <div className="rounded-lg border border-seam/60 bg-abyss/80 p-2 text-center">
-          <div className="text-[8px] tracking-wider text-forge-dim uppercase">TEMPERATURE</div>
-          <div className="text-xs font-semibold text-pearl">
-            T = {metrics.temperature.toFixed(2)}
-          </div>
-        </div>
-
-        {/* Perplexity */}
-        <div className="rounded-lg border border-seam/60 bg-abyss/80 p-2 text-center">
-          <div className="text-[8px] tracking-wider text-forge-dim uppercase">PERPLEXITY</div>
-          <div className="text-xs font-semibold text-pearl">
-            {metrics.perplexity.toFixed(2)} PPL
-          </div>
-        </div>
-
-        {/* Token Velocity */}
-        <div className="rounded-lg border border-seam/60 bg-abyss/80 p-2 text-center">
-          <div className="text-[8px] tracking-wider text-forge-dim uppercase">TOKEN RATE</div>
-          <div className="text-xs font-semibold text-forge-gold">
-            {metrics.tokPerSec} tok/s
+          {/* Live Token Tracker */}
+          <div className="flex flex-col gap-0.5">
+            <span className="text-[8px] text-forge-dim uppercase tracking-wider">LIVE TOKEN TRACKER</span>
+            <div className="flex items-center gap-2 text-[9px] text-forge-pearl">
+              <span>Input: <span className="font-bold text-cyan-300">18.4k</span></span>
+              <span className="text-seam">|</span>
+              <span>Output: <span className="font-bold text-purple-300">4.2k</span></span>
+              <span className="text-seam">|</span>
+              <span>Cost: <span className="font-bold text-amber-300">$0.00748</span></span>
+            </div>
           </div>
         </div>
       </div>

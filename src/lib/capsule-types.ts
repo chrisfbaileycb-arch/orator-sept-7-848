@@ -182,8 +182,10 @@ export interface DeploymentHandoffPackage {
 // 3. BUILD PASS & ENTITLEMENT CONTRACTS
 // ============================================================================
 
+export type BuildPassTierId = "executive" | "retainer" | "sprint" | "single" | "builder" | "studio";
+
 export interface BuildPassTierConfig {
-  id: "single" | "builder" | "studio";
+  id: BuildPassTierId;
   name: string;
   priceUsd: number;
   buildSessionsGranted: number;

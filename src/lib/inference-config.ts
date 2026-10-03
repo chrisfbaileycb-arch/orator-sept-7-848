@@ -1,19 +1,19 @@
 /**
  * ============================================================================
- * ORATOR.AI INFERENCE ENVIRONMENT CONFIGURATION
+ * ORATOR.AI INFERENCE ENVIRONMENT CONFIGURATION (US SOVEREIGN PLATFORM)
  * ============================================================================
  *
  * Rules:
  * - Credentials remain strictly server-side.
- * - Base URLs cannot be overridden by untrusted client inputs.
- * - Official hosted Cheaper Inference endpoint is the preferred default.
- * - OmniRoute remains an optional adapter, disabled by default.
+ * - The platform strictly uses US Sovereign providers:
+ *   - GEMINI_API_KEY (Google Gemini 3.8 Flash / 1.5 Pro)
+ *   - ANTHROPIC_API_KEY (Anthropic Claude 3.5 Sonnet / Sonnet 5)
  */
 
 export interface CheaperInferenceConfig {
   enabled: boolean;
   baseUrl: string;
-  apiKey: string;
+  apiKey?: string;
   allowedModels: string[];
   explorationModels: string[];
   buildModels: string[];
@@ -26,20 +26,17 @@ export interface CheaperInferenceConfig {
 export interface OpenRouterConfig {
   enabled: boolean;
   baseUrl: string;
-  apiKey: string;
+  apiKey?: string;
 }
 
 export interface OmniRouteConfig {
   enabled: boolean;
   baseUrl: string;
-  apiKey: string;
 }
 
 export interface DirectProvidersConfig {
-  openAiApiKey: string;
   geminiApiKey: string;
   anthropicApiKey: string;
-  huggingFaceApiKey: string;
 }
 
 // Safely access server environment without failing TypeScript in browser mode
@@ -74,7 +71,7 @@ export class InferenceConfigService {
     return {
       enabled: env.CHEAPER_INFERENCE_ENABLED !== "false",
       baseUrl,
-      apiKey: (env.CHEAPER_INFERENCE_API_KEY || "").trim(),
+      apiKey: "",
       allowedModels: parseCsv(env.CHEAPER_INFERENCE_ALLOWED_MODELS).length
         ? parseCsv(env.CHEAPER_INFERENCE_ALLOWED_MODELS)
         : [
@@ -82,14 +79,13 @@ export class InferenceConfigService {
             "openai/gpt-4o-mini",
             "anthropic/claude-3.5-sonnet",
             "meta-llama/llama-3.3-70b-instruct",
-            "deepseek/deepseek-chat",
           ],
       explorationModels: parseCsv(env.CHEAPER_INFERENCE_EXPLORATION_MODELS).length
         ? parseCsv(env.CHEAPER_INFERENCE_EXPLORATION_MODELS)
         : ["google/gemini-1.5-flash", "openai/gpt-4o-mini", "meta-llama/llama-3.3-70b-instruct"],
       buildModels: parseCsv(env.CHEAPER_INFERENCE_BUILD_MODELS).length
         ? parseCsv(env.CHEAPER_INFERENCE_BUILD_MODELS)
-        : ["anthropic/claude-3.5-sonnet", "openai/gpt-4o", "deepseek/deepseek-chat"],
+        : ["anthropic/claude-3.5-sonnet", "openai/gpt-4o"],
       verificationModels: parseCsv(env.CHEAPER_INFERENCE_VERIFICATION_MODELS).length
         ? parseCsv(env.CHEAPER_INFERENCE_VERIFICATION_MODELS)
         : ["openai/gpt-4o", "anthropic/claude-3.5-sonnet"],
@@ -102,29 +98,30 @@ export class InferenceConfigService {
   public getOpenRouterConfig(): OpenRouterConfig {
     const env = getServerEnv();
     return {
-      enabled: Boolean(env.OPENROUTER_API_KEY),
+      enabled: false,
       baseUrl: (env.OPENROUTER_BASE_URL || InferenceConfigService.OFFICIAL_OPENROUTER_URL).trim(),
-      apiKey: (env.OPENROUTER_API_KEY || "").trim(),
+      apiKey: "",
     };
   }
 
   public getOmniRouteConfig(): OmniRouteConfig {
     const env = getServerEnv();
-    // Disabled by default: does not delay core Orator experience
     return {
       enabled: env.OMNIROUTE_ENABLED === "true",
       baseUrl: (env.OMNIROUTE_BASE_URL || "http://localhost:8000/v1").trim(),
-      apiKey: (env.OMNIROUTE_API_KEY || "").trim(),
     };
   }
 
+  /**
+   * The platform exclusively declares and accepts US Sovereign credentials:
+   * - GEMINI_API_KEY
+   * - ANTHROPIC_API_KEY
+   */
   public getDirectProvidersConfig(): DirectProvidersConfig {
     const env = getServerEnv();
     return {
-      openAiApiKey: (env.OPENAI_API_KEY || "").trim(),
       geminiApiKey: (env.GEMINI_API_KEY || "").trim(),
       anthropicApiKey: (env.ANTHROPIC_API_KEY || "").trim(),
-      huggingFaceApiKey: (env.HUGGINGFACE_API_KEY || "").trim(),
     };
   }
 }
