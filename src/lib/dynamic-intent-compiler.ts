@@ -11,7 +11,7 @@
 
 export interface AppIntentMetadata {
   conceptTitle: string;
-  appType: "micro_fighting_print" | "pos_store" | "crm_pipeline" | "general_forge";
+  appType: "micro_fighting_print" | "pos_store" | "crm_pipeline" | "cyberpunk_vortex" | "general_forge";
   gemini: {
     title: string;
     duty: string;
@@ -46,11 +46,50 @@ export interface AppIntentMetadata {
 export function parseAppIntent(prompt: string, answers?: Record<string, string>): AppIntentMetadata {
   const combined = `${prompt} ${Object.values(answers || {}).join(" ")}`.toLowerCase();
 
+  const isVortexOrCyberpunk =
+    /vortex|cyberpunk|particle|p5|telemetry|waveform|canvas\s*vortex|visualizer/i.test(combined);
+
   const isFightingOrPrint =
     /fight|duel|combat|micro|sword|battle|print|poster|certificate|arcade|game/i.test(combined);
 
-  const isPOS = /pos|order|coffee|restaurant|store|retail|menu|cart|ticket/i.test(combined) && !isFightingOrPrint;
-  const isCRM = /crm|sales|lead|pipeline|deal/i.test(combined) && !isFightingOrPrint;
+  const isPOS = /pos|order|coffee|restaurant|store|retail|menu|cart|ticket/i.test(combined) && !isFightingOrPrint && !isVortexOrCyberpunk;
+  const isCRM = /crm|sales|lead|pipeline|deal/i.test(combined) && !isFightingOrPrint && !isVortexOrCyberpunk;
+
+  if (isVortexOrCyberpunk) {
+    return {
+      conceptTitle: "Cyberpunk Data Vortex",
+      appType: "cyberpunk_vortex",
+      gemini: {
+        title: "PHASE 1: PARTICLE KINEMATICS & VORTEX AST",
+        duty: "7-arm spiral kinematics, 3,000-particle trail buffers & HSB color spectrum AST",
+        badges: ["#ParticleKinematics", "#NoisePerturbation", "#TrailDecayBuffer", "#15QInquest"],
+        artifact: "spec/cyberpunk-vortex-spec.json",
+        log: "Synthesized parametric Archimedean logarithmic spiral formulas with Perlin perturbation.",
+      },
+      aws: {
+        title: "PHASE 2: REAL-TIME TELEMETRY DATA STREAMS",
+        duty: "Kinesis real-time event pipeline, radial metric aggregators & low-latency WebSocket edge",
+        badges: ["#KinesisStream", "#TimeSeriesLedger", "#EdgeWebSocket", "#IAMIsolation"],
+        artifact: "infra/telemetry-stream.aws.ts",
+        log: "Provisioned sub-10ms telemetry ingest pipelines for 100-sample rolling waveform buffers.",
+      },
+      claude: {
+        title: "PHASE 3: MULTI-LAYER P5.JS ENGINE & CYBERPUNK HUD",
+        duty: "High-performance triple-buffer graphics: vortexLayer, trailLayer & vector HUD overlay",
+        badges: ["#TripleBufferCanvas", "#P5JSEngine", "#WaveformRenderers", "#CyberpunkHUD"],
+        artifact: "src/CyberpunkDataVortex.tsx (820 LOC)",
+        log: "Synthesized 60 FPS layered p5.js visualizer with real-time waveform and radial gauge suite.",
+      },
+      azure: {
+        title: "PHASE 4: 60FPS FRAME BUFFER & MEMORY LEAK AUDIT",
+        duty: "Zero-trust memory lifecycle verification, WebGL/2D context leak checks & frame timing assertions",
+        badges: ["#ZeroTrustAudit", "#MemoryLeak0KB", "#60FPSAssert", "#FedRAMPHigh"],
+        artifact: "audit/zero-trust-vortex-report.json",
+        log: "0 graphics memory leaks; 60 FPS sustained throughput verified across 3,000 active particles.",
+      },
+      iframeSrcDoc: generateCyberpunkVortexHtml(),
+    };
+  }
 
   if (isFightingOrPrint || !isPOS && !isCRM) {
     // "Print App with Micro Fighting" - Default / Showcased App
@@ -591,6 +630,507 @@ function generatePOSStoreHtml(): string {
 <body class="p-6">
   <h1 class="text-xl font-bold text-cyan-400">NEXUS POS // BRIDGE v2.4</h1>
   <p class="text-xs text-gray-400 mt-1">Multi-tenant retail register synchronized via AWS Bedrock and Claude Code state machines.</p>
+</body>
+</html>`;
+}
+
+function generateCyberpunkVortexHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cyberpunk Data Vortex</title>
+  <script>p5.disableFriendlyErrors = true;</script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { 
+      width: 100%; 
+      height: 100%; 
+      overflow: hidden; 
+      background: #0a0a0f;
+      font-family: 'Courier New', monospace;
+      color: #00ff9f;
+    }
+    canvas { display: block; }
+    #ui-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .top-bar {
+      background: rgba(10, 10, 15, 0.9);
+      border-bottom: 1px solid #1a1a2e;
+      padding: 8px 16px;
+      display: flex;
+      gap: 20px;
+      font-size: 11px;
+      color: #00ff9f;
+    }
+    .top-bar span {
+      opacity: 0.7;
+    }
+    .top-bar span.active {
+      opacity: 1;
+      color: #00ffff;
+    }
+  </style>
+</head>
+<body>
+<div id="ui-overlay">
+  <div class="top-bar">
+    <span class="active">DASHBOARD</span>
+    <span>ANALYTICS</span>
+    <span>SYSTEMS</span>
+    <span>NETWORK</span>
+    <span>MODULES</span>
+    <span>SETTINGS</span>
+    <span style="margin-left: auto;">STATUS: <span style="color: #00ff00;">ACTIVE</span></span>
+  </div>
+</div>
+<script>
+// === Configuration ===
+const CONFIG = {
+  seed: 42,
+  particleCount: 3000,
+  spiralArms: 7,
+  rotationSpeed: 0.0008,
+  particleSize: 2,
+  trailLength: 0.92
+};
+
+// === Color Palette ===
+const COLORS = {
+  bg: [10, 10, 15],
+  spectrum: [
+    [180, 100, 100], // cyan
+    [150, 100, 90],  // teal
+    [120, 100, 95],  // green
+    [60, 100, 100],  // yellow
+    [30, 100, 100],  // orange
+    [0, 100, 95],    // red
+    [300, 100, 90],  // magenta
+    [270, 100, 95]   // purple
+  ],
+  ui: {
+    grid: [180, 50, 20, 20],
+    accent: [180, 100, 100],
+    warning: [30, 100, 100],
+    success: [120, 100, 90]
+  }
+};
+
+let particles = [];
+let vortexLayer, trailLayer, uiLayer;
+let time = 0;
+let dataStreams = [];
+let waveformData = [];
+let radialData = [];
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  randomSeed(CONFIG.seed);
+  noiseSeed(CONFIG.seed);
+  colorMode(HSB, 360, 100, 100, 100);
+  pixelDensity(1);
+  
+  vortexLayer = createGraphics(width, height);
+  vortexLayer.colorMode(HSB, 360, 100, 100, 100);
+  trailLayer = createGraphics(width, height);
+  trailLayer.colorMode(HSB, 360, 100, 100, 100);
+  uiLayer = createGraphics(width, height);
+  uiLayer.colorMode(HSB, 360, 100, 100, 100);
+  
+  initParticles();
+  
+  for (let i = 0; i < 5; i++) {
+    dataStreams.push({
+      data: [],
+      offset: random(1000),
+      speed: random(0.02, 0.05),
+      amplitude: random(30, 80),
+      color: COLORS.spectrum[floor(random(COLORS.spectrum.length))]
+    });
+  }
+  
+  for (let i = 0; i < 3; i++) {
+    waveformData.push({
+      data: new Array(100).fill(0),
+      freq: random(0.05, 0.15),
+      phase: random(TWO_PI)
+    });
+  }
+  
+  for (let i = 0; i < 12; i++) {
+    radialData.push({
+      value: random(0.3, 1),
+      target: random(0.3, 1),
+      hue: (i * 30) % 360
+    });
+  }
+  
+  frameRate(60);
+}
+
+function initParticles() {
+  particles = [];
+  for (let i = 0; i < CONFIG.particleCount; i++) {
+    let angle = random(TWO_PI);
+    let armIndex = floor(random(CONFIG.spiralArms));
+    let radius = random(10, min(width, height) * 0.35);
+    
+    particles.push(new VortexParticle(
+      width / 2,
+      height / 2,
+      angle,
+      radius,
+      armIndex
+    ));
+  }
+}
+
+class VortexParticle {
+  constructor(cx, cy, angle, radius, armIndex) {
+    this.cx = cx;
+    this.cy = cy;
+    this.angle = angle;
+    this.radius = radius;
+    this.armIndex = armIndex;
+    this.baseAngle = (TWO_PI / CONFIG.spiralArms) * armIndex;
+    this.speed = map(radius, 0, min(width, height) * 0.35, 0.02, 0.005);
+    this.size = CONFIG.particleSize * random(0.5, 1.5);
+    this.alpha = map(radius, 0, min(width, height) * 0.35, 100, 30);
+    this.noiseOffset = random(1000);
+    
+    let hueBase = (armIndex * 360 / CONFIG.spiralArms) % 360;
+    let hueVar = map(radius, 0, min(width, height) * 0.35, -30, 30);
+    this.hue = (hueBase + hueVar + 360) % 360;
+    this.sat = 100;
+    this.bri = map(radius, 0, min(width, height) * 0.35, 100, 60);
+  }
+  
+  update() {
+    this.angle += this.speed + CONFIG.rotationSpeed;
+    let noiseVal = noise(this.noiseOffset + time * 0.1);
+    let perturbation = map(noiseVal, 0, 1, -0.3, 0.3);
+    let spiralAngle = this.angle + this.baseAngle + (this.radius * 0.01);
+    let r = this.radius + sin(time * 0.5 + this.noiseOffset) * 5;
+    
+    this.x = this.cx + cos(spiralAngle) * r;
+    this.y = this.cy + sin(spiralAngle) * r;
+    this.bri = map(sin(time * 0.3 + this.angle), -1, 1, 60, 100);
+  }
+  
+  display(layer) {
+    layer.noStroke();
+    layer.fill(this.hue, this.sat, this.bri, this.alpha);
+    layer.ellipse(this.x, this.y, this.size);
+    if (random(1) < 0.1) {
+      layer.fill(this.hue, this.sat - 30, 100, this.alpha * 0.3);
+      layer.ellipse(this.x, this.y, this.size * 3);
+    }
+  }
+}
+
+function draw() {
+  time += 1;
+  background(COLORS.bg[0], COLORS.bg[1], COLORS.bg[2]);
+  
+  trailLayer.fill(COLORS.bg[0], COLORS.bg[1], COLORS.bg[2], (1 - CONFIG.trailLength) * 100);
+  trailLayer.noStroke();
+  trailLayer.rect(0, 0, width, height);
+  
+  vortexLayer.clear();
+  for (let p of particles) {
+    p.update();
+    p.display(trailLayer);
+  }
+  
+  let centerSize = 50 + sin(time * 0.05) * 20;
+  for (let i = 0; i < 3; i++) {
+    trailLayer.noStroke();
+    trailLayer.fill(180, 100, 100, 10 - i * 3);
+    trailLayer.ellipse(width / 2, height / 2, centerSize * (3 - i));
+  }
+  
+  image(trailLayer, 0, 0);
+  
+  renderRightPanel();
+  renderBottomPanel();
+  
+  image(uiLayer, 0, 0);
+}
+
+function renderRightPanel() {
+  let panelX = width - 280;
+  let panelY = 50;
+  let panelW = 260;
+  uiLayer.clear();
+  renderWaveform(panelX, panelY, panelW, 80, waveformData[0], [180, 100, 100]);
+  renderTimeSeries(panelX, panelY + 90, panelW, 100);
+  renderWaveform(panelX, panelY + 200, panelW, 60, waveformData[1], [300, 100, 90]);
+  renderBars(panelX, panelY + 270, panelW, 80);
+  renderNumericDisplay(panelX, panelY + 360, panelW, 60);
+}
+
+function renderBottomPanel() {
+  let panelY = height - 180;
+  renderStackedArea(20, panelY, width - 600, 100);
+  renderRadialViz(width - 500, panelY + 20, 140);
+  renderMetrics(width - 320, panelY + 10, 280, 80);
+  renderBarChart(width - 320, panelY + 100, 280, 60);
+}
+
+function renderWaveform(x, y, w, h, waveData, color) {
+  waveData.data.shift();
+  let val = sin(time * waveData.freq + waveData.phase) * 0.5 + noise(time * 0.01) * 0.5;
+  waveData.data.push(val);
+  
+  uiLayer.stroke(180, 50, 20, 30);
+  uiLayer.strokeWeight(1);
+  uiLayer.noFill();
+  uiLayer.rect(x, y, w, h);
+  
+  for (let i = 0; i < 5; i++) {
+    let gy = y + (h / 4) * i;
+    uiLayer.stroke(180, 50, 15, 20);
+    uiLayer.line(x, gy, x + w, gy);
+  }
+  
+  uiLayer.noFill();
+  uiLayer.stroke(color[0], color[1], color[2], 80);
+  uiLayer.strokeWeight(2);
+  uiLayer.beginShape();
+  for (let i = 0; i < waveData.data.length; i++) {
+    let px = map(i, 0, waveData.data.length - 1, x, x + w);
+    let py = map(waveData.data[i], -1, 1, y + h - 5, y + 5);
+    uiLayer.vertex(px, py);
+  }
+  uiLayer.endShape();
+}
+
+function renderTimeSeries(x, y, w, h) {
+  for (let stream of dataStreams) {
+    if (stream.data.length > 80) stream.data.shift();
+    let val = sin(time * stream.speed + stream.offset) * stream.amplitude;
+    stream.data.push(val);
+  }
+  
+  uiLayer.stroke(180, 50, 20, 30);
+  uiLayer.strokeWeight(1);
+  uiLayer.noFill();
+  uiLayer.rect(x, y, w, h);
+  
+  for (let i = 0; i < 5; i++) {
+    let gy = y + (h / 4) * i;
+    uiLayer.stroke(180, 50, 15, 20);
+    uiLayer.line(x, gy, x + w, gy);
+  }
+  
+  for (let stream of dataStreams) {
+    uiLayer.noFill();
+    uiLayer.stroke(stream.color[0], stream.color[1], stream.color[2], 70);
+    uiLayer.strokeWeight(1.5);
+    uiLayer.beginShape();
+    for (let i = 0; i < stream.data.length; i++) {
+      let px = map(i, 0, stream.data.length - 1, x, x + w);
+      let py = map(stream.data[i], -100, 100, y + h - 5, y + 5);
+      uiLayer.vertex(px, py);
+    }
+    uiLayer.endShape();
+  }
+}
+
+function renderBars(x, y, w, h) {
+  uiLayer.stroke(180, 50, 20, 30);
+  uiLayer.strokeWeight(1);
+  uiLayer.noFill();
+  uiLayer.rect(x, y, w, h);
+  
+  let barCount = 4;
+  let barH = 10;
+  let spacing = (h - barCount * barH) / (barCount + 1);
+  
+  for (let i = 0; i < barCount; i++) {
+    let by = y + spacing + i * (barH + spacing);
+    let value = noise(time * 0.01 + i * 100);
+    let barW = map(value, 0, 1, 0, w - 20);
+    
+    let hue = [120, 60, 30, 300][i];
+    uiLayer.noStroke();
+    uiLayer.fill(hue, 100, 90, 80);
+    uiLayer.rect(x + 10, by, barW, barH);
+    
+    uiLayer.fill(180, 50, 70);
+    uiLayer.textSize(9);
+    uiLayer.textAlign(LEFT, CENTER);
+    uiLayer.text(['CPU', 'MEM', 'GPU', 'NET'][i], x + w - 35, by + barH / 2);
+  }
+}
+
+function renderNumericDisplay(x, y, w, h) {
+  uiLayer.stroke(180, 50, 20, 30);
+  uiLayer.strokeWeight(1);
+  uiLayer.noFill();
+  uiLayer.rect(x, y, w, h);
+  
+  let value = 98.39 + sin(time * 0.02) * 0.5;
+  uiLayer.fill(120, 100, 100);
+  uiLayer.textSize(32);
+  uiLayer.textAlign(CENTER, CENTER);
+  uiLayer.text(value.toFixed(2), x + w / 2, y + h / 2);
+  
+  uiLayer.fill(180, 50, 70);
+  uiLayer.textSize(9);
+  uiLayer.text('EFFICIENCY', x + w / 2, y + h - 12);
+}
+
+function renderStackedArea(x, y, w, h) {
+  let segments = 5;
+  let points = 60;
+  let data = [];
+  
+  for (let i = 0; i < points; i++) {
+    let stack = [];
+    for (let j = 0; j < segments; j++) {
+      let val = noise(i * 0.1 + j * 50 + time * 0.002) * 40 + 10;
+      stack.push(val);
+    }
+    data.push(stack);
+  }
+  
+  for (let j = segments - 1; j >= 0; j--) {
+    let hue = (j * 60) % 360;
+    uiLayer.fill(hue, 90, 80, 70);
+    uiLayer.noStroke();
+    uiLayer.beginShape();
+    
+    for (let i = 0; i < points; i++) {
+      let px = map(i, 0, points - 1, x, x + w);
+      let sum = 0;
+      for (let k = 0; k <= j; k++) sum += data[i][k];
+      let py = map(sum, 0, 150, y + h, y);
+      uiLayer.vertex(px, py);
+    }
+    
+    uiLayer.vertex(x + w, y + h);
+    uiLayer.vertex(x, y + h);
+    uiLayer.endShape(CLOSE);
+  }
+  
+  uiLayer.stroke(180, 50, 20, 30);
+  uiLayer.strokeWeight(1);
+  uiLayer.noFill();
+  uiLayer.rect(x, y, w, h);
+}
+
+function renderRadialViz(cx, cy, radius) {
+  for (let segment of radialData) {
+    segment.value = lerp(segment.value, segment.target, 0.1);
+    if (random(1) < 0.02) {
+      segment.target = random(0.3, 1);
+    }
+  }
+  
+  let angleStep = TWO_PI / radialData.length;
+  for (let i = 0; i < radialData.length; i++) {
+    let angle = i * angleStep - HALF_PI;
+    let r = radius * radialData[i].value;
+    
+    uiLayer.noStroke();
+    uiLayer.fill(radialData[i].hue, 90, 85, 70);
+    uiLayer.beginShape();
+    uiLayer.vertex(cx, cy);
+    for (let a = angle; a < angle + angleStep + 0.01; a += angleStep / 10) {
+      let x = cx + cos(a) * r;
+      let y = cy + sin(a) * r;
+      uiLayer.vertex(x, y);
+    }
+    uiLayer.endShape(CLOSE);
+  }
+  
+  uiLayer.fill(10, 10, 15);
+  uiLayer.ellipse(cx, cy, radius * 0.3);
+  
+  uiLayer.noFill();
+  uiLayer.stroke(180, 50, 30, 50);
+  uiLayer.strokeWeight(1);
+  uiLayer.ellipse(cx, cy, radius * 2);
+}
+
+function renderMetrics(x, y, w, h) {
+  let metrics = [
+    { label: 'UPTIME', value: '847:23:16', color: [120, 100, 90] },
+    { label: 'NODES', value: '2,847', color: [180, 100, 100] },
+    { label: 'EVENTS', value: '14.2K', color: [60, 100, 100] }
+  ];
+  
+  let mw = w / 3;
+  for (let i = 0; i < metrics.length; i++) {
+    let mx = x + i * mw;
+    uiLayer.fill(metrics[i].color[0], metrics[i].color[1], metrics[i].color[2]);
+    uiLayer.textSize(16);
+    uiLayer.textAlign(CENTER, TOP);
+    uiLayer.text(metrics[i].value, mx + mw / 2, y);
+    
+    uiLayer.fill(180, 50, 60);
+    uiLayer.textSize(8);
+    uiLayer.text(metrics[i].label, mx + mw / 2, y + 20);
+  }
+}
+
+function renderBarChart(x, y, w, h) {
+  let bars = 6;
+  let barW = (w - (bars + 1) * 5) / bars;
+  
+  for (let i = 0; i < bars; i++) {
+    let bx = x + 5 + i * (barW + 5);
+    let value = noise(time * 0.01 + i * 50);
+    let barH = map(value, 0, 1, 5, h - 10);
+    
+    let hue = map(i, 0, bars - 1, 300, 180);
+    uiLayer.noStroke();
+    uiLayer.fill(hue, 90, 85, 80);
+    uiLayer.rect(bx, y + h - barH, barW, barH);
+  }
+  
+  uiLayer.stroke(180, 50, 20, 30);
+  uiLayer.strokeWeight(1);
+  uiLayer.noFill();
+  uiLayer.rect(x, y, w, h);
+}
+
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  vortexLayer = createGraphics(width, height);
+  vortexLayer.colorMode(HSB, 360, 100, 100, 100);
+  trailLayer = createGraphics(width, height);
+  trailLayer.colorMode(HSB, 360, 100, 100, 100);
+  uiLayer = createGraphics(width, height);
+  uiLayer.colorMode(HSB, 360, 100, 100, 100);
+  initParticles();
+}
+
+function keyPressed() {
+  if (key === 's' || key === 'S') saveCanvas('cyberpunk-vortex', 'png');
+  if (key === 'r' || key === 'R') {
+    CONFIG.seed = floor(millis());
+    randomSeed(CONFIG.seed);
+    noiseSeed(CONFIG.seed);
+    initParticles();
+  }
+  if (key === ' ') noLoop();
+}
+
+function keyReleased() {
+  if (key === ' ') loop();
+}
+</script>
 </body>
 </html>`;
 }

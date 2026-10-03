@@ -146,8 +146,8 @@ export default function OrbOfTheOrator({
         )}
       </div>
 
-      {/* Wake line — replaces caption temporarily when struck */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-[5%] text-center">
+      {/* Wake line / Caption — positioned cleanly outside the orb container so the sphere is 100% unobstructed */}
+      <div className="pointer-events-none absolute inset-x-0 -bottom-8 text-center">
         {wakeLine ? (
           <div
             key={wakeLine}
@@ -161,7 +161,7 @@ export default function OrbOfTheOrator({
           </div>
         ) : null}
         {sub && !wakeLine && (
-          <div className="mt-1.5 font-mono-hud text-[9px] tracking-[0.3em] text-forge-dim">
+          <div className="mt-1 font-mono-hud text-[9px] tracking-[0.3em] text-forge-dim">
             {sub}
           </div>
         )}

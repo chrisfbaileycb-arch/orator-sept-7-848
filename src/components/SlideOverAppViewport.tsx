@@ -17,13 +17,15 @@ export default function SlideOverAppViewport({
   const [isCodeDrawerOpen, setIsCodeDrawerOpen] = useState(false);
   const [selectedFileIdx, setSelectedFileIdx] = useState(0);
   const [copyFeedback, setCopyFeedback] = useState(false);
-  const [githubModalOpen, setGithubModalOpen] = useState(false);
-  const [githubRepoName, setGithubRepoName] = useState("micro-fighting-print-app");
-  const [githubBranch, setGithubBranch] = useState("main");
-  const [githubPushed, setGithubPushed] = useState(false);
-
   // Dynamic intent parser for prompt-tailored artifact and iframe
   const intent = useMemo(() => parseAppIntent(activePrompt), [activePrompt]);
+
+  const [githubModalOpen, setGithubModalOpen] = useState(false);
+  const [githubRepoName, setGithubRepoName] = useState(
+    intent.conceptTitle.toLowerCase().replace(/[^a-z0-9]/g, "-")
+  );
+  const [githubBranch, setGithubBranch] = useState("main");
+  const [githubPushed, setGithubPushed] = useState(false);
 
   // Dynamic code files matching bespoke intent
   const generatedFiles: GeneratedFile[] = useMemo(() => {
