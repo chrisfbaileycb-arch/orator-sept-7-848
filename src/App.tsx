@@ -10,6 +10,7 @@ import BookingModal from "./components/BookingModal";
 import BuildPassModal from "./components/BuildPassModal";
 import McpBenchModal from "./components/McpBenchModal";
 import ConceptSandboxModal from "./components/ConceptSandboxModal";
+import CortexTopologyMatrix from "./components/cortex/CortexTopologyMatrix";
 import { useSession } from "./lib/session";
 import { useScarcityAlerts, computeTelemetry } from "./lib/telemetry";
 import { buildPlan } from "./lib/generator";
@@ -27,6 +28,7 @@ export default function App() {
   const [showBooking, setShowBooking] = useState(false);
   const [showBuildPass, setShowBuildPass] = useState(false);
   const [showBench, setShowBench] = useState(false);
+  const [showCortex, setShowCortex] = useState(false);
   const [plan, setPlan] = useState<ForgePlan | null>(null);
   const [gateOpen, setGateOpen] = useState(false);
   const audit = useMemo(() => (plan ? runAudit(plan) : null), [plan]);
@@ -166,6 +168,7 @@ export default function App() {
         isChartered={session.isChartered}
         onBook={() => setShowBooking(true)}
         onBench={() => setShowBench(true)}
+        onOpenCortex={() => setShowCortex(true)}
       />
 
       <main>
@@ -180,6 +183,7 @@ export default function App() {
             onMoveToBuild={handleMoveToCompleteBuild}
             onBook={() => setShowBooking(true)}
             onOpenBuildPasses={() => setShowBuildPass(true)}
+            onOpenCortex={() => setShowCortex(true)}
           />
         )}
 
@@ -195,7 +199,12 @@ export default function App() {
         )}
 
         {status === "forging" && plan && !gateOpen && (
-          <ForgeDirector plan={plan} tier={tier} onComplete={handleForgeComplete} />
+          <ForgeDirector
+            plan={plan}
+            tier={tier}
+            onComplete={handleForgeComplete}
+            onOpenCortex={() => setShowCortex(true)}
+          />
         )}
 
         {status === "forging" && plan && gateOpen && audit && (
@@ -248,6 +257,10 @@ export default function App() {
       )}
 
       {showBench && <McpBenchModal onClose={() => setShowBench(false)} />}
+
+      {showCortex && (
+        <CortexTopologyMatrix isModal onClose={() => setShowCortex(false)} />
+      )}
     </div>
   );
 }

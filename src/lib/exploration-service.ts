@@ -241,12 +241,37 @@ export class DesignExplorationService {
       const q10Screen = answers["q10"] || "Central operational view";
 
       // 1. Synthesize rich, genuine reasoning into the Concept Brief
+      let headline = `${appName}: An autonomous ${archetype} solution`;
+      let problemSolved = `Eliminates workflow friction and manual overhead for ${targetUser.toLowerCase()} to achieve: ${primaryOutcome}.`;
+
+      // Connect to Google Gemini Project backend if reachable
+      if (typeof fetch !== "undefined") {
+        try {
+          const res = await fetch("/api/gemini/explore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ answers, ingest }),
+          });
+          if (res.ok) {
+            const geminiData = await res.json();
+            if (geminiData?.conceptName) {
+              headline = `${geminiData.conceptName}: ${appName}`;
+            }
+            if (geminiData?.summary) {
+              problemSolved = geminiData.summary;
+            }
+          }
+        } catch {
+          // Graceful fallback to deterministic synthesis
+        }
+      }
+
       const conceptBrief: ConceptBrief = {
         id: "brief-" + explorationId,
         appName,
-        headline: `${appName}: An autonomous ${archetype} solution`,
+        headline,
         targetCustomer: targetUser,
-        problemSolved: `Eliminates workflow friction and manual overhead for ${targetUser.toLowerCase()} to achieve: ${primaryOutcome}.`,
+        problemSolved,
         primaryWorkflow: `User initiates via ${q10Screen}, inputs verified parameters, triggers domain execution, and views instantaneous outcome verification.`,
         firstVersionScope: [
           `Single-screen primary command layout for ${targetUser}`,

@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { SessionApi } from "../lib/session";
 import type { ScarcityTelemetry } from "../lib/types";
 import type { DesignExploration } from "../lib/exploration-types";
-import OrbOfTheOrator from "./OrbOfTheOrator";
+import CortexTopologyMatrix from "./cortex/CortexTopologyMatrix";
 import { SKILL_CODEX } from "../lib/skills";
 import { MCP_BENCH } from "../lib/mcp";
 import DesignExplorationDeck from "./DesignExplorationDeck";
@@ -19,6 +19,7 @@ interface Props {
   onMoveToBuild: (exploration: DesignExploration) => void;
   onBook: () => void;
   onOpenBuildPasses: () => void;
+  onOpenCortex?: () => void;
 }
 
 const APPRAISALS = [
@@ -61,34 +62,38 @@ export default function Landing({
   onMoveToBuild,
   onBook,
   onOpenBuildPasses,
+  onOpenCortex,
 }: Props) {
   const [appraisal] = useState(() => Math.floor(Math.random() * APPRAISALS.length));
 
   return (
-    <div className="relative mx-auto max-w-6xl px-4 pb-28 pt-20">
-      {/* ============ HERO ============ */}
+    <div className="relative mx-auto max-w-7xl px-3 sm:px-6 pb-28 pt-16">
+      {/* ============ HERO & CORTEX REASONING MANIFOLD CENTERPIECE ============ */}
       <section className="relative flex flex-col items-center text-center">
-        {/* The Orator Orb */}
-        <div className="relative my-2">
-          <OrbOfTheOrator />
-        </div>
-
         <div className="relative z-10 max-w-3xl">
           <div className="inline-flex items-center gap-2 rounded-full border border-seam/80 bg-depth/70 px-3.5 py-1 font-mono-hud text-[9.5px] tracking-[0.2em] text-forge-cyan backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-forge-cyan animate-pulse-soft" />
-            ORATOR DESIGN STUDIO // THREE DESIGN EXPLORATIONS INCLUDED
+            ORATOR DESIGN STUDIO // CORTEX REASONING MATRIX ACTIVE
           </div>
 
-          <h1 className="mt-6 font-display text-4xl font-bold tracking-tight text-pearl sm:text-5xl md:text-6xl">
+          <h1 className="mt-4 font-display text-3xl font-bold tracking-tight text-pearl sm:text-4xl md:text-5xl">
             Discover your software
             <br />
             <span className="text-glow-cyan text-forge-cyan">with the Orator</span>
           </h1>
-          <p className="mx-auto mt-6 max-w-2xl text-[15px] leading-relaxed text-forge-dim">
-            Begin with three Design Explorations. Use Orator to examine ideas, compare directions, refine workflows, and interact with temporary concept sandboxes. When you are confident in the direction, use a Complete Orator Build to generate, verify, preview, and export the application.
+        </div>
+
+        {/* Central 3D Canvas Torus & Telemetry Matrix (Directly replacing moon/sphere orb) */}
+        <div className="relative my-4 w-full text-left">
+          <CortexTopologyMatrix isModal={false} />
+        </div>
+
+        <div className="relative z-10 max-w-3xl">
+          <p className="mx-auto text-[14px] leading-relaxed text-forge-dim">
+            Three Design Explorations included. Deliberate architectures, inspect real-time agentic reasoning, and execute production-grade software delivery.
           </p>
 
-          <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
+          <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
             {remainingExplorations > 0 ? (
               <button onClick={onBeginExploration} className="btn-forge btn-primary px-9 py-4 text-xs">
                 START DESIGN EXPLORATION →
@@ -104,6 +109,14 @@ export default function Landing({
             <button onClick={onOpenBuildPasses} className="btn-forge btn-gold px-6 py-4 text-xs">
               BUILD PASSES ($49–$199)
             </button>
+            {onOpenCortex && (
+              <button
+                onClick={onOpenCortex}
+                className="btn-forge border border-forge-cyan/50 bg-cyan-950/40 px-6 py-4 text-xs text-forge-cyan shadow-glow hover:bg-cyan-900/50"
+              >
+                ⚡ EXPAND MATRIX
+              </button>
+            )}
           </div>
 
           <div className="mt-5 font-mono-hud text-[10.5px] tracking-[0.14em] text-forge-dim">

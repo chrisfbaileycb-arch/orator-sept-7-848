@@ -9,10 +9,11 @@ interface Props {
   isChartered: boolean;
   onBook: () => void;
   onBench: () => void;
+  onOpenCortex?: () => void;
 }
 
 /** Persistent top HUD bar with live forge telemetry, plus scarcity toast stack. */
-export default function HudChrome({ telemetry, alerts, remainingFree, isChartered, onBook, onBench }: Props) {
+export default function HudChrome({ telemetry, alerts, remainingFree, isChartered, onBook, onBench, onOpenCortex }: Props) {
   return (
     <>
       <header className="fixed inset-x-0 top-0 z-40 border-b border-seam/80 bg-abyss/80 backdrop-blur-md">
@@ -42,6 +43,16 @@ export default function HudChrome({ telemetry, alerts, remainingFree, isChartere
           </div>
 
           <div className="flex items-center gap-2">
+            {onOpenCortex && (
+              <button
+                onClick={onOpenCortex}
+                className="group relative flex items-center gap-1.5 rounded-md border border-forge-cyan/50 bg-cyan-950/40 px-2.5 py-1.5 font-mono-hud text-[10px] font-bold text-forge-cyan shadow-glow hover:bg-cyan-900/50 hover:border-forge-cyan transition-all"
+                title="Launch CORTEX Topology Matrix Telemetry Visualizer"
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-forge-cyan animate-ping" />
+                <span>⚡ CORTEX MATRIX</span>
+              </button>
+            )}
             <button onClick={onBench} className="btn-forge btn-ghost px-3 py-1.5 text-[10px]" title="MCP tool bench">
               ⚙ MCP BENCH
             </button>

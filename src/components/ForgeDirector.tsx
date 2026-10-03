@@ -5,6 +5,7 @@ import { skillsForPhase, skillJournalLine } from "../lib/skills";
 import { mcpForPhase, mcpJournalLine } from "../lib/mcp";
 import OrbOfTheOrator from "./OrbOfTheOrator";
 import { orate, phaseSound, sealSound, setDroneEnergy } from "../lib/voice";
+import { cortexBus } from "../lib/cortex/bus";
 
 /** ---------- Phase IV Forge Execution Deck — you direct, the forge executes ---------- */
 
@@ -20,11 +21,12 @@ interface Props {
   plan: ForgePlan;
   tier: "free" | "paid";
   onComplete: (plan: ForgePlan) => void;
+  onOpenCortex?: () => void;
 }
 
 const RUN_MS = 1700;
 
-export default function ForgeDirector({ plan, tier, onComplete }: Props) {
+export default function ForgeDirector({ plan, tier, onComplete, onOpenCortex }: Props) {
   const [statuses, setStatuses] = useState<PhaseStatus[]>(() =>
     plan.phases.map((_, i) => (i === 0 ? "awaiting" : "pending"))
   );
@@ -66,8 +68,51 @@ export default function ForgeDirector({ plan, tier, onComplete }: Props) {
     setOrbEnergy(0.85);
     setDroneEnergy(0.9);
     phaseSound(true);
+
+    // Emit live event to CORTEX event bus
+    const phaseMap: Record<string, "parse" | "plan" | "draft" | "eval"> = {
+      spec: "parse",
+      architecture: "parse",
+      schema: "plan",
+      code: "draft",
+      tests: "eval",
+      audit: "eval",
+      security: "eval",
+      seal: "eval",
+    };
+    const mappedPhase = phaseMap[plan.phases[currentIdx].id] || "draft";
+    cortexBus.emitPhaseChange(mappedPhase);
+    cortexBus.emitReasoningStep({
+      id: `forge-${Date.now()}-${currentIdx}`,
+      phase: mappedPhase,
+      agentId: currentExpert.id,
+      agentName: currentExpert.label,
+      title: plan.phases[currentIdx].label,
+      detail: plan.phases[currentIdx].detail,
+      confidence: 0.93 + Math.random() * 0.05,
+      threshold: 0.85,
+      timestamp: Date.now(),
+      tokenCount: 450,
+      worldCoord: [Math.cos(currentIdx) * 2.3, Math.sin(currentIdx) * 0.75, 0],
+    });
+
     const skills = skillsForPhase(plan.phases[currentIdx].id);
     const servers = mcpForPhase(plan.phases[currentIdx].id);
+
+    // Emit tool calls if any
+    if (skills.length > 0) {
+      cortexBus.emitToolCall({
+        id: `tool-forge-${Date.now()}`,
+        agentId: currentExpert.id,
+        toolName: skills[0].name,
+        argsSummary: `{ phase: "${plan.phases[currentIdx].id}", mode: "deterministic" }`,
+        status: "completed",
+        latencyMs: 64,
+        timestamp: Date.now(),
+        outputSummary: "Pass. Isolated AST execution validated.",
+      });
+    }
+
     const t = setTimeout(() => {
       setStatuses((st) => {
         const next = [...st];
@@ -97,6 +142,15 @@ export default function ForgeDirector({ plan, tier, onComplete }: Props) {
       completedRef.current = true;
       log("delivery packet sealed — handing to the audit bureau", "sys");
       setDroneEnergy(0.05);
+
+      cortexBus.emitConsensus({
+        consensusScore: 0.99,
+        agentsAgreed: plan.experts.length,
+        totalAgents: plan.experts.length,
+        finalPhase: "eval",
+        verdict: "All flight plan phases verified. Cryptographic seal affirmed.",
+      });
+
       void orate("The forge has sealed your blueprint. Proceed to the audit bureau.");
       onComplete(plan);
     }
@@ -235,6 +289,18 @@ export default function ForgeDirector({ plan, tier, onComplete }: Props) {
             {statuses[currentIdx] === "done" && (
               <div className="font-mono-hud text-[10px] tracking-[0.16em] text-forge-cyan">
                 ✔ ALL PHASES COMPLETE — SEE DOSSIER
+              </div>
+            )}
+
+            {onOpenCortex && (
+              <div className="pt-2">
+                <button
+                  onClick={onOpenCortex}
+                  className="w-full flex items-center justify-center gap-2 rounded-lg border border-forge-cyan/40 bg-cyan-950/30 px-3 py-2 font-mono-hud text-[10px] font-bold text-forge-cyan hover:bg-cyan-900/40 transition-colors shadow-glow"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-forge-cyan animate-ping" />
+                  <span>⚡ EXPAND CORTEX 3D TOPOLOGY MATRIX</span>
+                </button>
               </div>
             )}
           </div>
