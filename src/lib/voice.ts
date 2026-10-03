@@ -180,16 +180,19 @@ export async function listen(
 
       rec.onresult = (ev) => {
         let interim = "";
+        let accumulatedFinal = "";
         for (let i = 0; i < ev.results.length; i++) {
           const r = ev.results[i];
           const alt = r[0];
-          if (r.isFinal) finalText += alt?.transcript ?? "";
+          if (r.isFinal) accumulatedFinal += (alt?.transcript ?? "") + " ";
           else interim += alt?.transcript ?? "";
         }
-        if (interim && opts.onPartial) {
-          opts.onPartial(interim);
+        finalText = accumulatedFinal;
+        const currentTranscript = (accumulatedFinal + interim).trim();
+        if (currentTranscript && opts.onPartial) {
+          opts.onPartial(currentTranscript);
           // Check for new word arrival to trigger ripple
-          const words = interim.trim().split(/\s+/).filter(Boolean);
+          const words = currentTranscript.split(/\s+/).filter(Boolean);
           if (words.length > lastPartialWordCount) {
             lastPartialWordCount = words.length;
             opts.onWord?.(words[words.length - 1]);

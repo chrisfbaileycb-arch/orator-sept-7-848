@@ -87,6 +87,90 @@ app.post("/api/gemini/generate", async (req, res) => {
   }
 });
 
+// 2b. Initial Exploratory Dialogue Back-and-Forth (Before 15-Question Build Inquest)
+app.post("/api/orator/chat", async (req, res) => {
+  const { messages, userMessage, systemPrompt } = req.body;
+  const userText = userMessage || (Array.isArray(messages) && messages[messages.length - 1]?.text) || "";
+
+  if (!userText && (!Array.isArray(messages) || messages.length === 0)) {
+    return res.status(400).json({ error: "No messages or input provided" });
+  }
+
+  const defaultOratorInstruction = `You are The Orator—a sovereign, perceptive, high-velocity technical architect and generative companion.
+The user is having an initial exploratory dialogue with you before beginning the 15-question architectural build inquest.
+Your role in this conversation is:
+1. Greet the user warmly and authoritatively when they say hello ("Hello orator, nice to meet you", etc.).
+2. Help the user talk out and work out their problems, architectural boundaries, target audience, and key pain points before deciding to build anything.
+3. Keep responses conversational, natural, and punchy (2-4 sentences max), speaking directly as The Orator.
+4. Ask one or two regular, insightful questions to advance the design and uncover what they truly need.
+5. When the user's intent is clear or when they say they want to build, encourage them to initiate the 15-question architectural inquest.`;
+
+  try {
+    if (!geminiApiKey) {
+      // Deterministic intelligent conversational fallback
+      const lower = userText.toLowerCase();
+      let reply = "Greetings. It is a pleasure to meet you. Welcome to the Forge. Before we commit to architecture, tell me: what kind of application, workflow, or problem is on your mind today?";
+
+      if (lower.includes("hello") || lower.includes("nice to meet") || lower.includes("hi")) {
+        reply = "Hello. It is great to meet you. Welcome to the Forge. Tell me: what application or problem are you looking to solve today, and who will be using it?";
+      } else if (lower.includes("pos") || lower.includes("order") || lower.includes("restaurant") || lower.includes("store")) {
+        reply = "A retail and order orchestration pipeline. To scope this accurately: will orders be entered via handheld tablets on-site, a customer-facing kiosk, or an online web register? And do you require split-second inventory decrementing?";
+      } else if (lower.includes("crm") || lower.includes("lead") || lower.includes("sales")) {
+        reply = "A customer pipeline engine. What is the core friction in your current workflow: lead qualification speed, automated stage triggers, or multi-seat sales rep visibility?";
+      } else if (lower.includes("vortex") || lower.includes("telemetry") || lower.includes("cyberpunk") || lower.includes("canvas") || lower.includes("visualizer")) {
+        reply = "A high-frequency graphical telemetry visualizer. To shape this correctly: should the particle fields bind to live WebSocket time-series metrics, or will it run locally on audio frequencies?";
+      } else if (lower.includes("fight") || lower.includes("print") || lower.includes("game") || lower.includes("combat") || lower.includes("card")) {
+        reply = "An interactive combat generator with tangible print outputs. What mechanics define the duel: turn-based strategic selection or real-time kinetic reactions?";
+      } else if (lower.includes("build") || lower.includes("ready") || lower.includes("yes") || lower.includes("start")) {
+        reply = "The core vision is clear. Let us now engage the 15-question architectural inquest to formalize every schema, pipeline, and deployment contract. Ready to begin?";
+      } else {
+        reply = `I hear you on "${userText.slice(0, 50)}...". That presents an interesting technical challenge. What is the single most critical workflow step that must happen flawlessly for your users?`;
+      }
+
+      return res.json({
+        reply,
+        model: DEFAULT_GEMINI_MODEL,
+        simulated: true,
+      });
+    }
+
+    // Build contents from dialogue history
+    const conversationHistory = Array.isArray(messages)
+      ? messages.map((m: any) => `${m.role === "user" ? "Customer" : "The Orator"}: ${m.text}`).join("\n")
+      : `Customer: ${userText}`;
+
+    const promptPayload = `Conversation history between The Orator and Customer:
+${conversationHistory}
+Customer: ${userText}
+
+Respond as The Orator with a natural, authoritative, conversational response (2-3 sentences), addressing what the customer said, talking through their problem, and asking 1 or 2 regular clarifying questions.`;
+
+    const response = await ai.models.generateContent({
+      model: DEFAULT_GEMINI_MODEL,
+      contents: promptPayload,
+      config: {
+        systemInstruction: systemPrompt || defaultOratorInstruction,
+        temperature: 0.7,
+      },
+    });
+
+    const reply = response.text?.trim() || "I understand. Tell me more about the primary workflow you envision.";
+    return res.json({
+      reply,
+      model: DEFAULT_GEMINI_MODEL,
+      usage: response.usageMetadata || null,
+      simulated: false,
+    });
+  } catch (error: any) {
+    console.error("Orator Chat Error:", error?.message || error);
+    return res.json({
+      reply: "I understand your vision. Tell me more about your target audience and the primary workflow you want to enable.",
+      model: DEFAULT_GEMINI_MODEL,
+      simulated: true,
+    });
+  }
+});
+
 // 3. CORTEX Step Deliberation (Real Agentic Telemetry Stream)
 app.post("/api/gemini/cortex-deliberate", async (req, res) => {
   const { taskPrompt, phase = "draft", agentName = "System Architect" } = req.body;
@@ -203,7 +287,7 @@ async function startServer() {
   } else {
     const distPath = path.resolve(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
+    app.use((_req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
